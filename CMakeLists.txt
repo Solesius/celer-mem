@@ -10,6 +10,7 @@ add_library(celer STATIC
     src/core/dispatch.cpp
     src/core/tree_builder.cpp
     src/backend/rocksdb.cpp
+    src/backend/sqlite.cpp
     src/backend/dynamic.cpp
     src/api/global.cpp
 )
@@ -33,6 +34,18 @@ else()
     target_link_libraries(celer PUBLIC rocksdb)
 endif()
 
+# ── SQLite3 dependency ──
+if(PkgConfig_FOUND)
+    pkg_check_modules(SQLITE3 IMPORTED_TARGET sqlite3)
+    if(SQLITE3_FOUND)
+        target_link_libraries(celer PUBLIC PkgConfig::SQLITE3)
+    else()
+        target_link_libraries(celer PUBLIC sqlite3)
+    endif()
+else()
+    target_link_libraries(celer PUBLIC sqlite3)
+endif()
+
 # ── Tests ──
 option(CELER_BUILD_TESTS "Build unit tests" ON)
 if(CELER_BUILD_TESTS)
@@ -47,6 +60,11 @@ if(CELER_BUILD_TESTS)
     target_link_libraries(celer_integration PRIVATE celer)
     target_compile_options(celer_integration PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME integration COMMAND celer_integration)
+
+    add_executable(celer_sqlite_tests tests/test_sqlite.cpp)
+    target_link_libraries(celer_sqlite_tests PRIVATE celer)
+    target_compile_options(celer_sqlite_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME sqlite COMMAND celer_sqlite_tests)
 endif()
 
 # ── Examples ──
