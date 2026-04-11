@@ -14,6 +14,7 @@
 // Backend
 #include "celer/backend/concept.hpp"
 #include "celer/backend/rocksdb.hpp"
+#include "celer/backend/sqlite.hpp"
 #include "celer/backend/dynamic.hpp"
 
 // Schema
