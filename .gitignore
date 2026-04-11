@@ -38,3 +38,7 @@ Testing/
 *.gcov
 lcov.info
 coverage/
+
+# Models (auto-downloaded by examples)
+models/
+*.gguf
