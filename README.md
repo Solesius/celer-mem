@@ -1,15 +1,15 @@
 # celer-mem
 
-A fast, embeddable, backend-agnostic memory store for C++23. Built for agent hackers — started as something for my own agent work and it turned out really smooth.
+A fast, embeddable, backend-agnostic memory store for C++23. Built for anyone looking for flexible storage in c++ land.
 
 ```cpp
 #include <celer/celer.hpp>
 
 int main() {
-    celer::backends::rocksdb::Config cfg{.path = "./my.db"};
+    auto factory = celer::backends::rocksdb::factory({.path = "./my.db"});
     std::vector<celer::TableDescriptor> schema{{"tasks", "today"}};
 
-    celer::open(celer::backends::rocksdb::factory(cfg), schema);
+    celer::open(factory, schema);
 
     auto tbl = celer::db("tasks")->table("today");
     tbl->put_raw("task-1", "Ship it");
@@ -146,12 +146,34 @@ All examples live in `examples/` and compile with `make examples`.
 | `02_multi_scope.cpp` | Hierarchical scopes, cross-scope isolation |
 | `03_batch_ops.cpp` | Batch writes, prefix grouping, foreach, compact |
 | `04_custom_backend.cpp` | Writing a custom `StorageBackend` (in-memory) |
+| `05_agent_memory.cpp` | Chat agent with llama.cpp, persistent memory, auto-compaction |
 
 Run an example after building:
 
 ```bash
 make examples
 ./build/examples/01_quickstart
+```
+
+### LLM Agent Memory
+
+[`05_agent_memory.cpp`](examples/05_agent_memory.cpp) is a complete chat agent backed by celer-mem and [llama.cpp](https://github.com/ggml-org/llama.cpp). It auto-downloads TinyLlama 1.1B — a small, dated model that runs on CPU to demonstrate persistence. The point is the memory layer, not the model quality.
+
+```bash
+# CPU — runs anywhere, good enough to show persistence
+docker run --rm -v ./models:/models -p 8080:8080 \
+  ghcr.io/ggml-org/llama.cpp:server \
+  -m /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+  --port 8080 --host 0.0.0.0
+
+# GPU — for larger models (Llama 3, Mistral, Qwen, etc.)
+docker run --rm --gpus all -v ./models:/models -p 8080:8080 \
+  ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m /models/your-model.gguf --port 8080 --host 0.0.0.0 --n-gpu-layers 99
+
+# Run the agent
+./build/examples/05_agent_memory --rocksdb   # persistent
+./build/examples/05_agent_memory --memory    # ephemeral
 ```
 
 ## Project structure
@@ -169,7 +191,7 @@ celer-mem/
 ├── tests/
 │   ├── main.cpp        # Unit tests (18)
 │   └── integration.cpp # E2E integration tests (10)
-├── examples/           # Working example programs (4)
+├── examples/           # Working example programs (5)
 ├── Makefile            # Primary build system
 └── CMakeLists.txt      # CMake alternative
 ```
@@ -281,7 +303,7 @@ jobs:
 - [x] Composite tree (Okasaki-immutable variant)
 - [x] Slick-style API (`all`, `filter`, `map`, `collect`, `foreach`, `batch`)
 - [x] `constexpr` typed schemas
-- [x] Working examples (4)
+- [x] Working examples (5 — including llama.cpp agent)
 - [x] Integration test suite (10 E2E tests)
 - [x] CMake install + FetchContent support
 - [ ] SQLite backend
