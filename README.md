@@ -68,7 +68,7 @@ cd rocksdb && make shared_lib && sudo make install-shared
 ### Make (primary)
 
 ```bash
-git clone https://github.com/yourusername/celer-mem.git
+git clone https://github.com/Solesius/celer-mem.git
 cd celer-mem
 
 # Build the library
@@ -121,7 +121,7 @@ sudo cmake --install build
 include(FetchContent)
 FetchContent_Declare(
     celer
-    GIT_REPOSITORY https://github.com/yourusername/celer-mem.git
+    GIT_REPOSITORY https://github.com/Solesius/celer-mem.git
     GIT_TAG        main
 )
 FetchContent_MakeAvailable(celer)
