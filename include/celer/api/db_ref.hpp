@@ -29,8 +29,7 @@ public:
             using N = std::decay_t<decltype(n)>;
             if constexpr (std::is_same_v<N, ColumnLeaf>) {
                 // Direct leaf — table_name is ignored, we're already at the leaf.
-                return TableRef{std::string(table_name),
-                                static_cast<const BackendHandle*>(n.handle_ctx)};
+                return TableRef{std::string(table_name), &n.handle};
             } else {
                 auto it = n.index.find(std::string(table_name));
                 if (it == n.index.end()) {
@@ -41,8 +40,7 @@ public:
                 return std::visit([&](const auto& c) -> Result<TableRef> {
                     using C = std::decay_t<decltype(c)>;
                     if constexpr (std::is_same_v<C, ColumnLeaf>) {
-                        return TableRef{std::string(table_name),
-                                        static_cast<const BackendHandle*>(c.handle_ctx)};
+                        return TableRef{std::string(table_name), &c.handle};
                     } else {
                         return std::unexpected(Error{"TableIsComposite",
                             "expected leaf, got composite"});

@@ -23,7 +23,17 @@ struct Codec {
     }
 };
 
-// ── Convenience free functions ──
+/// std::string specialization: identity passthrough (no serialization overhead).
+template <>
+struct Codec<std::string, void> {
+    [[nodiscard]] static auto encode(const std::string& value) -> Result<std::string> {
+        return value;
+    }
+
+    [[nodiscard]] static auto decode(std::string_view bytes) -> Result<std::string> {
+        return std::string(bytes);
+    }
+};
 
 template <typename T>
 [[nodiscard]] auto codec_encode(const T& value) -> Result<std::string> {

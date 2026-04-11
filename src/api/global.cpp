@@ -2,14 +2,24 @@
 
 #include <optional>
 
+#include "celer/core/tree_builder.hpp"
+
 namespace celer {
 
 namespace {
     std::optional<Store> g_store;
 }
 
-auto open(std::string_view /*path*/, std::string_view /*backend*/) -> VoidResult {
-    return std::unexpected(Error{"NotImplemented", "global open not yet wired"});
+auto open(BackendFactory factory, std::span<const TableDescriptor> tables) -> VoidResult {
+    if (g_store) {
+        return std::unexpected(Error{"AlreadyOpen", "celer::close() before re-opening"});
+    }
+
+    auto root_r = build_tree(std::move(factory), tables);
+    if (!root_r) return std::unexpected(root_r.error());
+
+    g_store.emplace(std::move(*root_r), ResourceStack{});
+    return {};
 }
 
 auto db(std::string_view scope_name) -> Result<DbRef> {
