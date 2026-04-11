@@ -1,7 +1,20 @@
 CXX       ?= g++
 CXXFLAGS  := -std=c++23 -Wall -Wextra -Wpedantic -Werror -O2
 CPPFLAGS  := -I include
-LDFLAGS   := -lrocksdb -lpthread
+
+# Auto-detect RocksDB. Override with CELER_NO_ROCKSDB=1 to force off.
+ifndef CELER_NO_ROCKSDB
+  HAS_ROCKSDB := $(shell printf '\043include <rocksdb/db.h>\n' | $(CXX) $(CPPFLAGS) -x c++ -fsyntax-only - 2>/dev/null && echo 1 || echo 0)
+else
+  HAS_ROCKSDB := 0
+endif
+
+ifeq ($(HAS_ROCKSDB),1)
+  LDFLAGS := -lrocksdb -lpthread
+else
+  LDFLAGS  := -lpthread
+  CPPFLAGS += -DCELER_FORCE_NO_ROCKSDB
+endif
 
 PREFIX    ?= /usr/local
 SRCDIR    := src
