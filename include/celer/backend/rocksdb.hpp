@@ -6,7 +6,7 @@
 #include "celer/backend/concept.hpp"
 #include "celer/core/result.hpp"
 
-#if __has_include(<rocksdb/db.h>)
+#if !defined(CELER_FORCE_NO_ROCKSDB) && __has_include(<rocksdb/db.h>)
 #  define CELER_HAS_ROCKSDB 1
 #  include <rocksdb/db.h>
 #  include <rocksdb/options.h>
