@@ -6,6 +6,8 @@
 #include <variant>
 #include <vector>
 
+#include "celer/backend/concept.hpp"
+
 namespace celer {
 
 // Forward declarations
@@ -16,11 +18,11 @@ struct CompositeNode;
 /// Okasaki-immutable: constructed once at startup, shared lock-free across threads.
 using StoreNode = std::variant<ColumnLeaf, CompositeNode>;
 
+/// A leaf node owns a type-erased BackendHandle (RAII, move-only).
+/// Per RFC §4.2: "ColumnLeaf { name, handle }"
 struct ColumnLeaf {
-    std::string name;
-    // BackendHandle will be stored here once backend/concept.hpp is implemented.
-    // For now: opaque pointer placeholder for clean compilation.
-    void* handle_ctx{nullptr};
+    std::string   name;
+    BackendHandle handle;
 };
 
 struct CompositeNode {

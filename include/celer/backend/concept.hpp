@@ -5,10 +5,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
-#include "celer/core/dispatch.hpp"
 #include "celer/core/result.hpp"
+#include "celer/core/types.hpp"
 
 namespace celer {
 
@@ -45,9 +46,35 @@ struct BackendVTable {
 };
 
 /// Type-erased backend handle. Owns the backend via vtable destroy.
+/// Move-only RAII: destructor calls destroy_fn to release the backend.
 struct BackendHandle {
     void*                ctx{nullptr};
     const BackendVTable* vtable{nullptr};
+
+    BackendHandle() = default;
+    BackendHandle(void* c, const BackendVTable* v) noexcept : ctx(c), vtable(v) {}
+
+    ~BackendHandle() {
+        if (ctx && vtable && vtable->destroy_fn) {
+            vtable->destroy_fn(ctx);
+        }
+    }
+
+    // Move-only
+    BackendHandle(BackendHandle&& o) noexcept
+        : ctx(std::exchange(o.ctx, nullptr)), vtable(std::exchange(o.vtable, nullptr)) {}
+
+    auto operator=(BackendHandle&& o) noexcept -> BackendHandle& {
+        if (this != &o) {
+            if (ctx && vtable && vtable->destroy_fn) vtable->destroy_fn(ctx);
+            ctx    = std::exchange(o.ctx, nullptr);
+            vtable = std::exchange(o.vtable, nullptr);
+        }
+        return *this;
+    }
+
+    BackendHandle(const BackendHandle&)            = delete;
+    auto operator=(const BackendHandle&) -> BackendHandle& = delete;
 
     [[nodiscard]] auto get(std::string_view key) const -> Result<std::optional<std::string>> {
         return vtable->get_fn(ctx, key);

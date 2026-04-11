@@ -9,21 +9,9 @@
 
 #include "celer/core/composite.hpp"
 #include "celer/core/result.hpp"
+#include "celer/core/types.hpp"
 
 namespace celer {
-
-struct KVPair {
-    std::string key;
-    std::string value;
-};
-
-struct BatchOp {
-    enum class Kind { put, del };
-    Kind                        kind;
-    std::string                 cf_name;
-    std::string                 key;
-    std::optional<std::string>  value;
-};
 
 // ── Key routing ──
 
@@ -44,7 +32,7 @@ struct RouteResult {
 } // namespace detail
 
 // ── Dispatch free functions ──
-// Stub signatures — implementations will come in the functional build pass.
+// Route through the composite tree to the correct leaf BackendHandle.
 
 [[nodiscard]] auto node_get(const StoreNode& node, std::string_view key)
     -> Result<std::optional<std::string>>;
@@ -63,8 +51,6 @@ struct RouteResult {
 
 [[nodiscard]] auto node_compact(const StoreNode& node)
     -> VoidResult;
-
-using ScanVisitor = void(*)(void* ctx, std::string_view key, std::string_view value);
 
 [[nodiscard]] auto node_foreach(const StoreNode& node, std::string_view prefix,
                                 ScanVisitor visitor, void* ctx)

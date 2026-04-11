@@ -5,6 +5,7 @@
 
 // Core
 #include "celer/core/result.hpp"
+#include "celer/core/types.hpp"
 #include "celer/core/resource_stack.hpp"
 #include "celer/core/composite.hpp"
 #include "celer/core/dispatch.hpp"

@@ -2,8 +2,8 @@
 
 namespace celer {
 
-auto build_leaf(std::string name, void* backend_ctx) -> Result<StoreNode> {
-    return StoreNode{ColumnLeaf{std::move(name), backend_ctx}};
+auto build_leaf(std::string name, BackendHandle handle) -> Result<StoreNode> {
+    return StoreNode{ColumnLeaf{std::move(name), std::move(handle)}};
 }
 
 auto build_composite(std::string name, std::vector<StoreNode> children) -> Result<StoreNode> {

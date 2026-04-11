@@ -1,30 +1,71 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #include "celer/backend/concept.hpp"
 #include "celer/core/result.hpp"
 
+#if __has_include(<rocksdb/db.h>)
+#  define CELER_HAS_ROCKSDB 1
+#  include <rocksdb/db.h>
+#  include <rocksdb/options.h>
+#  include <rocksdb/write_batch.h>
+#  include <rocksdb/iterator.h>
+#  include <rocksdb/slice.h>
+#else
+#  define CELER_HAS_ROCKSDB 0
+#endif
+
 namespace celer {
 
-/// RocksDB store configuration.
+/// RocksDB store configuration (SML entity: StoreConfig).
 struct StoreConfig {
     std::string path;
-    bool        create_if_missing     = true;
-    bool        enable_compression    = true;
-    int         max_open_files        = 256;
+    bool        create_if_missing      = true;
+    bool        enable_compression     = true;
+    int         max_open_files         = 256;
     int         write_buffer_size_bytes = 4 * 1024 * 1024;
 };
 
-// ── RocksDB Backend ──
-// Stub for clean compilation. Real implementation requires <rocksdb/db.h>.
+#if CELER_HAS_ROCKSDB
 
-#if __has_include(<rocksdb/db.h>)
+/// RocksDBBackend — satisfies StorageBackend concept.
+/// One instance per leaf (can share a rocksdb::DB* across leaves via column families,
+/// but v1 uses one DB per leaf for simplicity — RFC §4.3).
+class RocksDBBackend {
+public:
+    RocksDBBackend() = default;
 
-// TODO: Real RocksDB backend implementation.
-// Will satisfy StorageBackend concept.
+    explicit RocksDBBackend(rocksdb::DB* db) noexcept : db_(db) {}
 
-#endif
+    RocksDBBackend(RocksDBBackend&& o) noexcept : db_(std::exchange(o.db_, nullptr)) {}
+    auto operator=(RocksDBBackend&& o) noexcept -> RocksDBBackend& {
+        if (this != &o) { close(); db_ = std::exchange(o.db_, nullptr); }
+        return *this;
+    }
+
+    RocksDBBackend(const RocksDBBackend&)            = delete;
+    auto operator=(const RocksDBBackend&) -> RocksDBBackend& = delete;
+
+    ~RocksDBBackend() { close(); }
+
+    [[nodiscard]] static auto name() noexcept -> std::string_view { return "rocksdb"; }
+
+    [[nodiscard]] auto get(std::string_view key) -> Result<std::optional<std::string>>;
+    [[nodiscard]] auto put(std::string_view key, std::string_view value) -> VoidResult;
+    [[nodiscard]] auto del(std::string_view key) -> VoidResult;
+    [[nodiscard]] auto prefix_scan(std::string_view prefix) -> Result<std::vector<KVPair>>;
+    [[nodiscard]] auto batch(std::span<const BatchOp> ops) -> VoidResult;
+    [[nodiscard]] auto compact() -> VoidResult;
+    [[nodiscard]] auto foreach_scan(std::string_view prefix, ScanVisitor visitor, void* user_ctx) -> VoidResult;
+    auto close() -> VoidResult;
+
+private:
+    rocksdb::DB* db_{nullptr};
+};
+
+#endif // CELER_HAS_ROCKSDB
 
 /// Factory: create a RocksDB BackendHandle from config.
 /// Returns error if RocksDB is not available or path is invalid.
