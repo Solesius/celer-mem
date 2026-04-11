@@ -1,7 +1,9 @@
 #include "celer/backend/sqlite.hpp"
 
 #include <filesystem>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace celer {
 
@@ -40,19 +42,34 @@ auto prefix_upper_bound(std::string_view prefix) -> std::string {
     return {}; // all 0xFF — no upper bound
 }
 
+/// Escape a SQL identifier: double any embedded double-quote characters.
+/// Returns the identifier wrapped in double quotes, safe for use in SQL.
+auto quote_ident(std::string_view name) -> std::string {
+    std::string out;
+    out.reserve(name.size() + 2);
+    out.push_back('"');
+    for (char c : name) {
+        if (c == '"') out.push_back('"'); // double the quote to escape
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
 } // namespace
 
 // ── StorageBackend method implementations ──
+// Each method uses table_name_ (the real SQL table inside the shared scope DB).
 
 auto SQLiteBackend::get(std::string_view key) -> Result<std::optional<std::string>> {
     if (!db_) return std::unexpected(Error{"SQLiteGet", "db is closed"});
 
-    const char* sql = "SELECT value FROM kv WHERE key = ?";
+    auto sql = "SELECT value FROM " + quote_ident(table_name_) + " WHERE key = ?";
     ::sqlite3_stmt* raw_stmt = nullptr;
-    int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+    int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
     StmtGuard guard(raw_stmt);
     if (rc != SQLITE_OK) {
-        return std::unexpected(Error{"StoreGet", ::sqlite3_errmsg(db_)});
+        return std::unexpected(Error{"StoreGet", ::sqlite3_errmsg(db_.get())});
     }
 
     ::sqlite3_bind_text(raw_stmt, 1, key.data(), static_cast<int>(key.size()), SQLITE_STATIC);
@@ -62,7 +79,7 @@ auto SQLiteBackend::get(std::string_view key) -> Result<std::optional<std::strin
         return std::optional<std::string>{std::nullopt}; // not found
     }
     if (rc != SQLITE_ROW) {
-        return std::unexpected(Error{"StoreGet", ::sqlite3_errmsg(db_)});
+        return std::unexpected(Error{"StoreGet", ::sqlite3_errmsg(db_.get())});
     }
 
     const auto* blob = reinterpret_cast<const char*>(::sqlite3_column_blob(raw_stmt, 0));
@@ -73,12 +90,12 @@ auto SQLiteBackend::get(std::string_view key) -> Result<std::optional<std::strin
 auto SQLiteBackend::put(std::string_view key, std::string_view value) -> VoidResult {
     if (!db_) return std::unexpected(Error{"SQLitePut", "db is closed"});
 
-    const char* sql = "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)";
+    auto sql = "INSERT OR REPLACE INTO " + quote_ident(table_name_) + " (key, value) VALUES (?, ?)";
     ::sqlite3_stmt* raw_stmt = nullptr;
-    int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+    int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
     StmtGuard guard(raw_stmt);
     if (rc != SQLITE_OK) {
-        return std::unexpected(Error{"StorePut", ::sqlite3_errmsg(db_)});
+        return std::unexpected(Error{"StorePut", ::sqlite3_errmsg(db_.get())});
     }
 
     ::sqlite3_bind_text(raw_stmt, 1, key.data(), static_cast<int>(key.size()), SQLITE_STATIC);
@@ -86,7 +103,7 @@ auto SQLiteBackend::put(std::string_view key, std::string_view value) -> VoidRes
 
     rc = ::sqlite3_step(raw_stmt);
     if (rc != SQLITE_DONE) {
-        return std::unexpected(Error{"StorePut", ::sqlite3_errmsg(db_)});
+        return std::unexpected(Error{"StorePut", ::sqlite3_errmsg(db_.get())});
     }
     return {};
 }
@@ -94,19 +111,19 @@ auto SQLiteBackend::put(std::string_view key, std::string_view value) -> VoidRes
 auto SQLiteBackend::del(std::string_view key) -> VoidResult {
     if (!db_) return std::unexpected(Error{"SQLiteDel", "db is closed"});
 
-    const char* sql = "DELETE FROM kv WHERE key = ?";
+    auto sql = "DELETE FROM " + quote_ident(table_name_) + " WHERE key = ?";
     ::sqlite3_stmt* raw_stmt = nullptr;
-    int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+    int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
     StmtGuard guard(raw_stmt);
     if (rc != SQLITE_OK) {
-        return std::unexpected(Error{"StoreDel", ::sqlite3_errmsg(db_)});
+        return std::unexpected(Error{"StoreDel", ::sqlite3_errmsg(db_.get())});
     }
 
     ::sqlite3_bind_text(raw_stmt, 1, key.data(), static_cast<int>(key.size()), SQLITE_STATIC);
 
     rc = ::sqlite3_step(raw_stmt);
     if (rc != SQLITE_DONE) {
-        return std::unexpected(Error{"StoreDel", ::sqlite3_errmsg(db_)});
+        return std::unexpected(Error{"StoreDel", ::sqlite3_errmsg(db_.get())});
     }
     return {};
 }
@@ -114,16 +131,17 @@ auto SQLiteBackend::del(std::string_view key) -> VoidResult {
 auto SQLiteBackend::prefix_scan(std::string_view prefix) -> Result<std::vector<KVPair>> {
     if (!db_) return std::unexpected(Error{"SQLiteScan", "db is closed"});
 
+    auto tbl = quote_ident(table_name_);
     std::vector<KVPair> results;
 
     if (prefix.empty()) {
         // Empty prefix → return all rows, ordered by key
-        const char* sql = "SELECT key, value FROM kv ORDER BY key";
+        auto sql = "SELECT key, value FROM " + tbl + " ORDER BY key";
         ::sqlite3_stmt* raw_stmt = nullptr;
-        int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+        int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
         StmtGuard guard(raw_stmt);
         if (rc != SQLITE_OK) {
-            return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_)});
+            return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_.get())});
         }
 
         while ((rc = ::sqlite3_step(raw_stmt)) == SQLITE_ROW) {
@@ -137,18 +155,18 @@ auto SQLiteBackend::prefix_scan(std::string_view prefix) -> Result<std::vector<K
             });
         }
         if (rc != SQLITE_DONE) {
-            return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_)});
+            return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_.get())});
         }
     } else {
         auto upper = prefix_upper_bound(prefix);
         if (upper.empty()) {
             // Prefix is all 0xFF — use >= only
-            const char* sql = "SELECT key, value FROM kv WHERE key >= ? ORDER BY key";
+            auto sql = "SELECT key, value FROM " + tbl + " WHERE key >= ? ORDER BY key";
             ::sqlite3_stmt* raw_stmt = nullptr;
-            int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+            int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
             StmtGuard guard(raw_stmt);
             if (rc != SQLITE_OK) {
-                return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_)});
+                return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_.get())});
             }
             ::sqlite3_bind_text(raw_stmt, 1, prefix.data(), static_cast<int>(prefix.size()), SQLITE_STATIC);
 
@@ -162,12 +180,12 @@ auto SQLiteBackend::prefix_scan(std::string_view prefix) -> Result<std::vector<K
                 results.push_back(KVPair{std::move(key_str), std::string(v, static_cast<std::size_t>(vlen))});
             }
         } else {
-            const char* sql = "SELECT key, value FROM kv WHERE key >= ? AND key < ? ORDER BY key";
+            auto sql = "SELECT key, value FROM " + tbl + " WHERE key >= ? AND key < ? ORDER BY key";
             ::sqlite3_stmt* raw_stmt = nullptr;
-            int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+            int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
             StmtGuard guard(raw_stmt);
             if (rc != SQLITE_OK) {
-                return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_)});
+                return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_.get())});
             }
             ::sqlite3_bind_text(raw_stmt, 1, prefix.data(), static_cast<int>(prefix.size()), SQLITE_STATIC);
             ::sqlite3_bind_text(raw_stmt, 2, upper.data(), static_cast<int>(upper.size()), SQLITE_STATIC);
@@ -183,7 +201,7 @@ auto SQLiteBackend::prefix_scan(std::string_view prefix) -> Result<std::vector<K
                 });
             }
             if (rc != SQLITE_DONE) {
-                return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_)});
+                return std::unexpected(Error{"StorePrefixScan", ::sqlite3_errmsg(db_.get())});
             }
         }
     }
@@ -194,9 +212,16 @@ auto SQLiteBackend::prefix_scan(std::string_view prefix) -> Result<std::vector<K
 auto SQLiteBackend::batch(std::span<const BatchOp> ops) -> VoidResult {
     if (!db_) return std::unexpected(Error{"SQLiteBatch", "db is closed"});
 
-    // Execute as a single transaction for atomicity
+    // Use SAVEPOINT instead of BEGIN/COMMIT for safe nesting on shared connections.
+    // Two tables in the same scope share one sqlite3* — plain BEGIN would conflict.
+    auto sp = "sp_" + std::to_string(next_savepoint_id());
+    auto sp_begin    = "SAVEPOINT "    + quote_ident(sp);
+    auto sp_release  = "RELEASE "      + quote_ident(sp);
+    auto sp_rollback = "ROLLBACK TO "  + quote_ident(sp);
+    auto tbl         = quote_ident(table_name_);
+
     char* errmsg = nullptr;
-    int rc = ::sqlite3_exec(db_, "BEGIN", nullptr, nullptr, &errmsg);
+    int rc = ::sqlite3_exec(db_.get(), sp_begin.c_str(), nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::string msg = errmsg ? errmsg : "unknown error";
         ::sqlite3_free(errmsg);
@@ -206,43 +231,48 @@ auto SQLiteBackend::batch(std::span<const BatchOp> ops) -> VoidResult {
     for (const auto& op : ops) {
         if (op.kind == BatchOp::Kind::put) {
             if (!op.value) {
-                ::sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+                ::sqlite3_exec(db_.get(), sp_rollback.c_str(), nullptr, nullptr, nullptr);
+                ::sqlite3_exec(db_.get(), sp_release.c_str(), nullptr, nullptr, nullptr);
                 return std::unexpected(Error{"StoreBatch", "put op missing value"});
             }
-            const char* sql = "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)";
+            auto sql = "INSERT OR REPLACE INTO " + tbl + " (key, value) VALUES (?, ?)";
             ::sqlite3_stmt* raw_stmt = nullptr;
-            rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+            rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
             StmtGuard guard(raw_stmt);
             if (rc != SQLITE_OK) {
-                ::sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
-                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_)});
+                ::sqlite3_exec(db_.get(), sp_rollback.c_str(), nullptr, nullptr, nullptr);
+                ::sqlite3_exec(db_.get(), sp_release.c_str(), nullptr, nullptr, nullptr);
+                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_.get())});
             }
             ::sqlite3_bind_text(raw_stmt, 1, op.key.data(), static_cast<int>(op.key.size()), SQLITE_STATIC);
             ::sqlite3_bind_blob(raw_stmt, 2, op.value->data(), static_cast<int>(op.value->size()), SQLITE_STATIC);
             rc = ::sqlite3_step(raw_stmt);
             if (rc != SQLITE_DONE) {
-                ::sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
-                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_)});
+                ::sqlite3_exec(db_.get(), sp_rollback.c_str(), nullptr, nullptr, nullptr);
+                ::sqlite3_exec(db_.get(), sp_release.c_str(), nullptr, nullptr, nullptr);
+                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_.get())});
             }
         } else {
-            const char* sql = "DELETE FROM kv WHERE key = ?";
+            auto sql = "DELETE FROM " + tbl + " WHERE key = ?";
             ::sqlite3_stmt* raw_stmt = nullptr;
-            rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+            rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
             StmtGuard guard(raw_stmt);
             if (rc != SQLITE_OK) {
-                ::sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
-                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_)});
+                ::sqlite3_exec(db_.get(), sp_rollback.c_str(), nullptr, nullptr, nullptr);
+                ::sqlite3_exec(db_.get(), sp_release.c_str(), nullptr, nullptr, nullptr);
+                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_.get())});
             }
             ::sqlite3_bind_text(raw_stmt, 1, op.key.data(), static_cast<int>(op.key.size()), SQLITE_STATIC);
             rc = ::sqlite3_step(raw_stmt);
             if (rc != SQLITE_DONE) {
-                ::sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
-                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_)});
+                ::sqlite3_exec(db_.get(), sp_rollback.c_str(), nullptr, nullptr, nullptr);
+                ::sqlite3_exec(db_.get(), sp_release.c_str(), nullptr, nullptr, nullptr);
+                return std::unexpected(Error{"StoreBatch", ::sqlite3_errmsg(db_.get())});
             }
         }
     }
 
-    rc = ::sqlite3_exec(db_, "COMMIT", nullptr, nullptr, &errmsg);
+    rc = ::sqlite3_exec(db_.get(), sp_release.c_str(), nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::string msg = errmsg ? errmsg : "unknown error";
         ::sqlite3_free(errmsg);
@@ -256,7 +286,7 @@ auto SQLiteBackend::compact() -> VoidResult {
 
     // SQLite's equivalent of compaction is VACUUM
     char* errmsg = nullptr;
-    int rc = ::sqlite3_exec(db_, "VACUUM", nullptr, nullptr, &errmsg);
+    int rc = ::sqlite3_exec(db_.get(), "VACUUM", nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::string msg = errmsg ? errmsg : "unknown error";
         ::sqlite3_free(errmsg);
@@ -269,13 +299,15 @@ auto SQLiteBackend::foreach_scan(std::string_view prefix, ScanVisitor visitor, v
     -> VoidResult {
     if (!db_) return std::unexpected(Error{"SQLiteForeach", "db is closed"});
 
+    auto tbl = quote_ident(table_name_);
+
     if (prefix.empty()) {
-        const char* sql = "SELECT key, value FROM kv ORDER BY key";
+        auto sql = "SELECT key, value FROM " + tbl + " ORDER BY key";
         ::sqlite3_stmt* raw_stmt = nullptr;
-        int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+        int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
         StmtGuard guard(raw_stmt);
         if (rc != SQLITE_OK) {
-            return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_)});
+            return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_.get())});
         }
 
         while ((rc = ::sqlite3_step(raw_stmt)) == SQLITE_ROW) {
@@ -287,17 +319,17 @@ auto SQLiteBackend::foreach_scan(std::string_view prefix, ScanVisitor visitor, v
                               std::string_view(v, static_cast<std::size_t>(vlen)));
         }
         if (rc != SQLITE_DONE) {
-            return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_)});
+            return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_.get())});
         }
     } else {
         auto upper = prefix_upper_bound(prefix);
         if (upper.empty()) {
-            const char* sql = "SELECT key, value FROM kv WHERE key >= ? ORDER BY key";
+            auto sql = "SELECT key, value FROM " + tbl + " WHERE key >= ? ORDER BY key";
             ::sqlite3_stmt* raw_stmt = nullptr;
-            int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+            int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
             StmtGuard guard(raw_stmt);
             if (rc != SQLITE_OK) {
-                return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_)});
+                return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_.get())});
             }
             ::sqlite3_bind_text(raw_stmt, 1, prefix.data(), static_cast<int>(prefix.size()), SQLITE_STATIC);
 
@@ -311,12 +343,12 @@ auto SQLiteBackend::foreach_scan(std::string_view prefix, ScanVisitor visitor, v
                 visitor(user_ctx, key_sv, std::string_view(v, static_cast<std::size_t>(vlen)));
             }
         } else {
-            const char* sql = "SELECT key, value FROM kv WHERE key >= ? AND key < ? ORDER BY key";
+            auto sql = "SELECT key, value FROM " + tbl + " WHERE key >= ? AND key < ? ORDER BY key";
             ::sqlite3_stmt* raw_stmt = nullptr;
-            int rc = ::sqlite3_prepare_v2(db_, sql, -1, &raw_stmt, nullptr);
+            int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
             StmtGuard guard(raw_stmt);
             if (rc != SQLITE_OK) {
-                return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_)});
+                return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_.get())});
             }
             ::sqlite3_bind_text(raw_stmt, 1, prefix.data(), static_cast<int>(prefix.size()), SQLITE_STATIC);
             ::sqlite3_bind_text(raw_stmt, 2, upper.data(), static_cast<int>(upper.size()), SQLITE_STATIC);
@@ -330,7 +362,7 @@ auto SQLiteBackend::foreach_scan(std::string_view prefix, ScanVisitor visitor, v
                                   std::string_view(v, static_cast<std::size_t>(vlen)));
             }
             if (rc != SQLITE_DONE) {
-                return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_)});
+                return std::unexpected(Error{"StoreForeachScan", ::sqlite3_errmsg(db_.get())});
             }
         }
     }
@@ -339,20 +371,18 @@ auto SQLiteBackend::foreach_scan(std::string_view prefix, ScanVisitor visitor, v
 }
 
 auto SQLiteBackend::close() -> VoidResult {
-    if (db_) {
-        ::sqlite3_close(db_);
-        db_ = nullptr;
-    }
+    db_.reset(); // shared_ptr — last handle triggers SqliteDeleter
     return {};
 }
 
 namespace {
 
-/// Open a single SQLite database at the resolved path.
-auto open_single(const backends::sqlite::Config& config, const std::string& resolved_path)
-    -> Result<BackendHandle> {
+/// Open (or reuse) a scope-level SQLite database at path/<scope>.db.
+/// Returns a shared_ptr so multiple tables in the same scope share one connection.
+auto open_scope_db(const backends::sqlite::Config& config, const std::string& db_path)
+    -> Result<SqliteDbPtr> {
     // Create parent directories
-    auto parent = std::filesystem::path(resolved_path).parent_path();
+    auto parent = std::filesystem::path(db_path).parent_path();
     if (!parent.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(parent, ec);
@@ -370,12 +400,12 @@ auto open_single(const backends::sqlite::Config& config, const std::string& reso
     flags |= SQLITE_OPEN_FULLMUTEX;
 
     ::sqlite3* raw_db = nullptr;
-    int rc = ::sqlite3_open_v2(resolved_path.c_str(), &raw_db, flags, nullptr);
+    int rc = ::sqlite3_open_v2(db_path.c_str(), &raw_db, flags, nullptr);
     if (rc != SQLITE_OK) {
         std::string msg = raw_db ? ::sqlite3_errmsg(raw_db) : "unknown error";
         if (raw_db) ::sqlite3_close(raw_db);
         return std::unexpected(Error{"SQLiteOpen",
-            "failed to open SQLite at '" + resolved_path + "': " + msg});
+            "failed to open SQLite at '" + db_path + "': " + msg});
     }
 
     // Set busy timeout
@@ -393,21 +423,25 @@ auto open_single(const backends::sqlite::Config& config, const std::string& reso
         }
     }
 
-    // Create the kv table if it doesn't exist
-    {
-        char* errmsg = nullptr;
-        rc = ::sqlite3_exec(raw_db,
-            "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value BLOB NOT NULL)",
-            nullptr, nullptr, &errmsg);
-        if (rc != SQLITE_OK) {
-            std::string msg = errmsg ? errmsg : "unknown error";
-            ::sqlite3_free(errmsg);
-            ::sqlite3_close(raw_db);
-            return std::unexpected(Error{"SQLiteOpen", "failed to create kv table: " + msg});
-        }
+    return SqliteDbPtr(raw_db, SqliteDeleter{});
+}
+
+/// Create a named SQL table inside an already-open scope DB and return a BackendHandle.
+auto open_table(const SqliteDbPtr& db, std::string_view table_name)
+    -> Result<BackendHandle> {
+    // Create the table (named after the logical table) if it doesn't exist
+    auto create_sql = "CREATE TABLE IF NOT EXISTS " + quote_ident(table_name) +
+                      " (key TEXT PRIMARY KEY, value BLOB NOT NULL)";
+    char* errmsg = nullptr;
+    int rc = ::sqlite3_exec(db.get(), create_sql.c_str(), nullptr, nullptr, &errmsg);
+    if (rc != SQLITE_OK) {
+        std::string msg = errmsg ? errmsg : "unknown error";
+        ::sqlite3_free(errmsg);
+        return std::unexpected(Error{"SQLiteOpen",
+            "failed to create table '" + std::string(table_name) + "': " + msg});
     }
 
-    auto* backend = new SQLiteBackend(raw_db);
+    auto* backend = new SQLiteBackend(db, std::string(table_name));
     return make_backend_handle<SQLiteBackend>(backend);
 }
 
@@ -416,9 +450,34 @@ auto open_single(const backends::sqlite::Config& config, const std::string& reso
 namespace backends::sqlite {
 
 auto factory(Config cfg) -> BackendFactory {
-    return [c = std::move(cfg)](std::string_view scope, std::string_view table) -> Result<BackendHandle> {
-        auto resolved = c.path + "/" + std::string(scope) + "/" + std::string(table) + ".db";
-        return open_single(c, resolved);
+    // Cache: one shared sqlite3 connection per scope.
+    // Protected by mutex since build_tree calls the factory sequentially,
+    // but we guard anyway for safety.
+    struct SharedState {
+        std::mutex mu;
+        std::unordered_map<std::string, SqliteDbPtr> scope_dbs;
+    };
+    auto state = std::make_shared<SharedState>();
+
+    return [c = std::move(cfg), state](std::string_view scope, std::string_view table) -> Result<BackendHandle> {
+        std::string scope_key(scope);
+        SqliteDbPtr db;
+
+        {
+            std::lock_guard lock(state->mu);
+            auto it = state->scope_dbs.find(scope_key);
+            if (it != state->scope_dbs.end()) {
+                db = it->second;
+            } else {
+                auto db_path = c.path + "/" + scope_key + ".db";
+                auto r = open_scope_db(c, db_path);
+                if (!r) return std::unexpected(r.error());
+                db = std::move(*r);
+                state->scope_dbs[scope_key] = db;
+            }
+        }
+
+        return open_table(db, table);
     };
 }
 

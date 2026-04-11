@@ -9,11 +9,23 @@ else
   HAS_ROCKSDB := 0
 endif
 
-ifeq ($(HAS_ROCKSDB),1)
-  LDFLAGS := -lrocksdb -lpthread
+# Auto-detect SQLite3. Override with CELER_NO_SQLITE=1 to force off.
+ifndef CELER_NO_SQLITE
+  HAS_SQLITE := $(shell printf '\043include <sqlite3.h>\n' | $(CXX) $(CPPFLAGS) -x c++ -fsyntax-only - 2>/dev/null && echo 1 || echo 0)
 else
-  LDFLAGS  := -lpthread
+  HAS_SQLITE := 0
+endif
+
+LDFLAGS := -lpthread
+
+ifeq ($(HAS_ROCKSDB),1)
+  LDFLAGS += -lrocksdb
+else
   CPPFLAGS += -DCELER_FORCE_NO_ROCKSDB
+endif
+
+ifeq ($(HAS_SQLITE),1)
+  LDFLAGS += -lsqlite3
 endif
 
 PREFIX    ?= /usr/local

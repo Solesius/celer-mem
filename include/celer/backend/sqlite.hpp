@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -19,33 +21,42 @@ namespace backends::sqlite {
 
 /// SQLite-specific configuration.
 struct Config {
-    std::string path;                  ///< Directory for db files (one file per table)
+    std::string path;                  ///< Directory for db files (one file per scope)
     bool        create_if_missing = true;
     bool        enable_wal        = true; ///< Use WAL journal mode for better concurrency
     int         busy_timeout_ms   = 5000; ///< Busy-wait timeout in milliseconds
 };
 
-/// Returns a BackendFactory that creates one SQLite database per (scope, table)
-/// at path/<scope>/<table>.db.
+/// Returns a BackendFactory that opens one SQLite database per scope
+/// at path/<scope>.db, with each logical table as a real SQL table inside it.
 [[nodiscard]] auto factory(Config cfg) -> BackendFactory;
 
 } // namespace backends::sqlite
 
 #if CELER_HAS_SQLITE
 
+/// Custom deleter for shared_ptr<sqlite3>.
+struct SqliteDeleter {
+    void operator()(::sqlite3* db) const noexcept {
+        if (db) ::sqlite3_close(db);
+    }
+};
+
+/// Shared ownership of a SQLite connection. Last handle closes the DB.
+using SqliteDbPtr = std::shared_ptr<::sqlite3>;
+
 /// SQLiteBackend — satisfies StorageBackend concept.
-/// One DB file per leaf; uses a single 'kv' table with (key TEXT PRIMARY KEY, value BLOB).
+/// One shared DB file per scope; each logical table is a real SQL table
+/// inside it (key TEXT PRIMARY KEY, value BLOB).
 class SQLiteBackend {
 public:
     SQLiteBackend() = default;
 
-    explicit SQLiteBackend(::sqlite3* db) noexcept : db_(db) {}
+    SQLiteBackend(SqliteDbPtr db, std::string table_name) noexcept
+        : db_(std::move(db)), table_name_(std::move(table_name)) {}
 
-    SQLiteBackend(SQLiteBackend&& o) noexcept : db_(std::exchange(o.db_, nullptr)) {}
-    auto operator=(SQLiteBackend&& o) noexcept -> SQLiteBackend& {
-        if (this != &o) { close(); db_ = std::exchange(o.db_, nullptr); }
-        return *this;
-    }
+    SQLiteBackend(SQLiteBackend&&) noexcept            = default;
+    auto operator=(SQLiteBackend&&) noexcept -> SQLiteBackend& = default;
 
     SQLiteBackend(const SQLiteBackend&)            = delete;
     auto operator=(const SQLiteBackend&) -> SQLiteBackend& = delete;
@@ -64,7 +75,14 @@ public:
     auto close() -> VoidResult;
 
 private:
-    ::sqlite3* db_{nullptr};
+    SqliteDbPtr db_;
+    std::string table_name_;
+
+    /// Generate a unique savepoint name for batch operations on shared connections.
+    static auto next_savepoint_id() -> std::uint64_t {
+        static std::atomic<std::uint64_t> counter{0};
+        return counter.fetch_add(1, std::memory_order_relaxed);
+    }
 };
 
 #endif // CELER_HAS_SQLITE
