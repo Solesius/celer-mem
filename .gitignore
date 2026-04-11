@@ -1,0 +1,40 @@
+# Build
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+compile_commands.json
+design/*
+sml/*
+*.sml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+_deps/
+third_party/rocksdb/
+third_party/reflect-cpp/
+
+# Test artifacts
+Testing/
+*.db/
+*.db.lock
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+lcov.info
+coverage/
