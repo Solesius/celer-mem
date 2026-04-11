@@ -397,6 +397,48 @@ TEST(test_sqlite_concurrent_reads) {
     cleanup("concurrent");
 }
 
+// ════════════════════════════════════════
+// SQL injection protection — validate_ident
+// ════════════════════════════════════════
+
+TEST(test_sqlite_rejects_injection_in_table_name) {
+    cleanup("injection");
+    auto dir = tmp_dir("injection");
+    celer::backends::sqlite::Config cfg{.path = dir};
+    auto fac = celer::backends::sqlite::factory(cfg);
+
+    // SQL injection attempt via table name
+    auto r1 = fac("safe_scope", "x; DROP TABLE y --");
+    assert(!r1.has_value());
+    assert(r1.error().code == "SQLiteValidation");
+
+    // NUL byte in table name
+    auto r2 = fac("safe_scope", std::string_view("ok\0evil", 7));
+    assert(!r2.has_value());
+    assert(r2.error().code == "SQLiteValidation");
+
+    // Empty table name
+    auto r3 = fac("safe_scope", "");
+    assert(!r3.has_value());
+    assert(r3.error().code == "SQLiteValidation");
+
+    // Quotes in table name
+    auto r4 = fac("safe_scope", R"(tbl"name)");
+    assert(!r4.has_value());
+    assert(r4.error().code == "SQLiteValidation");
+
+    // Bad scope name (path traversal attempt)
+    auto r5 = fac("../etc", "tbl");
+    assert(!r5.has_value());
+    assert(r5.error().code == "SQLiteValidation");
+
+    // Good names still work
+    auto r6 = fac("valid_scope", "valid_table_123");
+    assert(r6.has_value());
+
+    cleanup("injection");
+}
+
 // ── Entry point ──
 
 int main() {

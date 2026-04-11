@@ -42,13 +42,33 @@ auto prefix_upper_bound(std::string_view prefix) -> std::string {
     return {}; // all 0xFF — no upper bound
 }
 
+/// Validate that a name is safe for use as a SQL identifier.
+/// Allows only non-empty strings of ASCII letters, digits, and underscores.
+/// This is the primary defense against SQL injection for table/scope names;
+/// quote_ident() below provides a secondary defense-in-depth layer.
+auto validate_ident(std::string_view name) -> VoidResult {
+    if (name.empty()) {
+        return std::unexpected(Error{"SQLiteValidation", "identifier must not be empty"});
+    }
+    for (char c : name) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_')) {
+            return std::unexpected(Error{"SQLiteValidation",
+                "identifier contains invalid character: only [a-zA-Z0-9_] allowed"});
+        }
+    }
+    return {};
+}
+
 /// Escape a SQL identifier: double any embedded double-quote characters.
 /// Returns the identifier wrapped in double quotes, safe for use in SQL.
+/// Defense-in-depth only — callers should validate_ident() first.
 auto quote_ident(std::string_view name) -> std::string {
     std::string out;
     out.reserve(name.size() + 2);
     out.push_back('"');
     for (char c : name) {
+        if (c == '\0') continue; // strip NUL bytes to prevent C-string truncation
         if (c == '"') out.push_back('"'); // double the quote to escape
         out.push_back(c);
     }
@@ -429,6 +449,10 @@ auto open_scope_db(const backends::sqlite::Config& config, const std::string& db
 /// Create a named SQL table inside an already-open scope DB and return a BackendHandle.
 auto open_table(const SqliteDbPtr& db, std::string_view table_name)
     -> Result<BackendHandle> {
+    // Primary defense: reject any name that isn't strictly alphanumeric/underscore.
+    // This prevents SQL injection regardless of quoting correctness.
+    if (auto v = validate_ident(table_name); !v) return std::unexpected(v.error());
+
     // Create the table (named after the logical table) if it doesn't exist
     auto create_sql = "CREATE TABLE IF NOT EXISTS " + quote_ident(table_name) +
                       " (key TEXT PRIMARY KEY, value BLOB NOT NULL)";
@@ -460,6 +484,9 @@ auto factory(Config cfg) -> BackendFactory {
     auto state = std::make_shared<SharedState>();
 
     return [c = std::move(cfg), state](std::string_view scope, std::string_view table) -> Result<BackendHandle> {
+        // Validate scope name — it becomes part of a file path AND could be used as an identifier.
+        if (auto v = validate_ident(scope); !v) return std::unexpected(v.error());
+
         std::string scope_key(scope);
         SqliteDbPtr db;
 
