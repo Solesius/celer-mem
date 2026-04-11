@@ -51,11 +51,11 @@ IT(should_persist_data_across_close_reopen) {
     const auto* tag = "persist";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
     // Write
     {
-        auto r = celer::open(cfg, schema);
+        auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
         assert(r.has_value());
         auto tbl = celer::db("data")->table("kv");
         (void)tbl->put_raw("greeting", "hello from session 1");
@@ -64,7 +64,7 @@ IT(should_persist_data_across_close_reopen) {
 
     // Re-open and verify
     {
-        auto r = celer::open(cfg, schema);
+        auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
         assert(r.has_value());
         auto tbl = celer::db("data")->table("kv");
         auto got = tbl->get_raw("greeting");
@@ -85,9 +85,9 @@ IT(should_isolate_tables_within_scope) {
     const auto* tag = "isolation";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"app", "users"}, {"app", "logs"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    auto r = celer::open(cfg, schema);
+    auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     assert(r.has_value());
 
     auto users = celer::db("app")->table("users");
@@ -116,9 +116,9 @@ IT(should_handle_10k_records) {
     const auto* tag = "large_dataset";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"bench", "data"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    auto r = celer::open(cfg, schema);
+    auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     assert(r.has_value());
 
     auto tbl = celer::db("bench")->table("data");
@@ -153,24 +153,15 @@ IT(should_work_with_instance_api) {
     const auto* tag = "instance_api";
     auto dir = fresh(tag);
 
-    // Build tree manually — project/{tasks, notes}
-    celer::StoreConfig cfg_t{.path = dir + "/tasks"};
-    celer::StoreConfig cfg_n{.path = dir + "/notes"};
-    auto h_t = celer::create_rocksdb_backend(cfg_t);
-    auto h_n = celer::create_rocksdb_backend(cfg_n);
-    assert(h_t.has_value() && h_n.has_value());
+    // build_tree makes manual Store construction backend-agnostic
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    std::vector<celer::TableDescriptor> schema{
+        {"project", "tasks"},
+        {"project", "notes"},
+    };
 
-    auto l_t = celer::build_leaf("tasks", std::move(*h_t));
-    auto l_n = celer::build_leaf("notes", std::move(*h_n));
-
-    std::vector<celer::StoreNode> leaves;
-    leaves.push_back(std::move(*l_t));
-    leaves.push_back(std::move(*l_n));
-    auto project = celer::build_composite("project", std::move(leaves));
-
-    std::vector<celer::StoreNode> scopes;
-    scopes.push_back(std::move(*project));
-    auto root = celer::build_composite("root", std::move(scopes));
+    auto root = celer::build_tree(celer::backends::rocksdb::factory(cfg), schema);
+    assert(root.has_value());
 
     celer::Store store{std::move(*root), celer::ResourceStack{}};
 
@@ -198,9 +189,9 @@ IT(should_round_trip_typed_strings) {
     const auto* tag = "typed_strings";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    auto r = celer::open(cfg, schema);
+    auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     assert(r.has_value());
 
     auto tbl = celer::db("data")->table("kv");
@@ -231,12 +222,12 @@ IT(should_reject_double_open) {
     const auto* tag = "double_open";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    auto r1 = celer::open(cfg, schema);
+    auto r1 = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     assert(r1.has_value());
 
-    auto r2 = celer::open(cfg, schema);
+    auto r2 = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     assert(!r2.has_value());
     assert(r2.error().code == "AlreadyOpen");
 
@@ -248,9 +239,9 @@ IT(should_error_on_bad_scope) {
     const auto* tag = "bad_scope";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    (void)celer::open(cfg, schema);
+    (void)celer::open(celer::backends::rocksdb::factory(cfg), schema);
     auto bad = celer::db("nope");
     assert(!bad.has_value());
     assert(bad.error().code == "ScopeNotFound");
@@ -263,9 +254,9 @@ IT(should_error_on_bad_table) {
     const auto* tag = "bad_table";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    (void)celer::open(cfg, schema);
+    (void)celer::open(celer::backends::rocksdb::factory(cfg), schema);
     auto db = celer::db("data");
     assert(db.has_value());
     auto bad = db->table("nonexistent");
@@ -294,9 +285,9 @@ IT(should_handle_concurrent_reads) {
     const auto* tag = "concurrent";
     auto dir = fresh(tag);
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::StoreConfig cfg{.path = dir};
+    celer::backends::rocksdb::Config cfg{.path = dir};
 
-    auto r = celer::open(cfg, schema);
+    auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     assert(r.has_value());
 
     auto tbl = celer::db("data")->table("kv");

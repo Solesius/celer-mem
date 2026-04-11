@@ -19,25 +19,32 @@
 
 namespace celer {
 
-/// RocksDB store configuration (SML entity: StoreConfig).
-struct StoreConfig {
+namespace backends::rocksdb {
+
+/// RocksDB-specific configuration. Other backends define their own Config.
+struct Config {
     std::string path;
-    bool        create_if_missing      = true;
-    bool        enable_compression     = true;
-    int         max_open_files         = 256;
-    int         write_buffer_size_bytes = 4 * 1024 * 1024;
+    bool        create_if_missing       = true;
+    bool        enable_compression      = true;
+    int         max_open_files          = 256;
+    int         write_buffer_size_bytes  = 4 * 1024 * 1024;
 };
+
+/// Returns a BackendFactory that creates one RocksDB instance per (scope, table)
+/// at path/<scope>/<table>/.
+[[nodiscard]] auto factory(Config cfg) -> BackendFactory;
+
+} // namespace backends::rocksdb
 
 #if CELER_HAS_ROCKSDB
 
 /// RocksDBBackend — satisfies StorageBackend concept.
-/// One instance per leaf (can share a rocksdb::DB* across leaves via column families,
-/// but v1 uses one DB per leaf for simplicity — RFC §4.3).
+/// One DB per leaf; column-family sharing is a future optimization.
 class RocksDBBackend {
 public:
     RocksDBBackend() = default;
 
-    explicit RocksDBBackend(rocksdb::DB* db) noexcept : db_(db) {}
+    explicit RocksDBBackend(::rocksdb::DB* db) noexcept : db_(db) {}
 
     RocksDBBackend(RocksDBBackend&& o) noexcept : db_(std::exchange(o.db_, nullptr)) {}
     auto operator=(RocksDBBackend&& o) noexcept -> RocksDBBackend& {
@@ -62,13 +69,9 @@ public:
     auto close() -> VoidResult;
 
 private:
-    rocksdb::DB* db_{nullptr};
+    ::rocksdb::DB* db_{nullptr};
 };
 
 #endif // CELER_HAS_ROCKSDB
-
-/// Factory: create a RocksDB BackendHandle from config.
-/// Returns error if RocksDB is not available or path is invalid.
-[[nodiscard]] auto create_rocksdb_backend(const StoreConfig& config) -> Result<BackendHandle>;
 
 } // namespace celer

@@ -35,8 +35,6 @@ struct Codec<std::string, void> {
     }
 };
 
-// ── Convenience free functions ──
-
 template <typename T>
 [[nodiscard]] auto codec_encode(const T& value) -> Result<std::string> {
     return Codec<T>::encode(value);

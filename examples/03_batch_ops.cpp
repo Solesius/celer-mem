@@ -14,8 +14,8 @@ int main() {
     fs::remove_all(db_path);
 
     std::vector<celer::TableDescriptor> schema{{"project", "tasks"}};
-    celer::StoreConfig cfg{.path = db_path.string()};
-    auto r = celer::open(cfg, schema);
+    celer::backends::rocksdb::Config cfg{.path = db_path.string()};
+    auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     if (!r) { std::cerr << "open: " << r.error().message << "\n"; return 1; }
 
     auto tasks = celer::db("project")->table("tasks");

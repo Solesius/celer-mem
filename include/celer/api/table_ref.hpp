@@ -81,12 +81,12 @@ public:
         return handle_->compact();
     }
 
-    /// Raw string put — bypasses serde. Useful for testing and plain string storage.
+    /// Raw put — bypasses serde.
     [[nodiscard]] auto put_raw(std::string_view key, std::string_view value) const -> VoidResult {
         return handle_->put(key, value);
     }
 
-    /// Raw string get — bypasses serde. Returns nullopt on miss.
+    /// Raw get — bypasses serde.
     [[nodiscard]] auto get_raw(std::string_view key) const -> Result<std::optional<std::string>> {
         return handle_->get(key);
     }

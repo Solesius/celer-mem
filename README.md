@@ -6,10 +6,10 @@ A fast, embeddable, backend-agnostic memory store for C++23. Built for agent hac
 #include <celer/celer.hpp>
 
 int main() {
-    celer::StoreConfig cfg{.path = "./my.db"};
+    celer::backends::rocksdb::Config cfg{.path = "./my.db"};
     std::vector<celer::TableDescriptor> schema{{"tasks", "today"}};
 
-    celer::open(cfg, schema);
+    celer::open(celer::backends::rocksdb::factory(cfg), schema);
 
     auto tbl = celer::db("tasks")->table("today");
     tbl->put_raw("task-1", "Ship it");
@@ -74,7 +74,7 @@ cd celer-mem
 # Build the library
 make
 
-# Run unit tests (17 tests)
+# Run unit tests (18 tests)
 make test
 
 # Run integration tests (10 E2E tests)
@@ -167,7 +167,7 @@ celer-mem/
 │   └── celer.hpp       # Umbrella header
 ├── src/                # Translation units (5 .cpp files)
 ├── tests/
-│   ├── main.cpp        # Unit tests (17)
+│   ├── main.cpp        # Unit tests (18)
 │   └── integration.cpp # E2E integration tests (10)
 ├── examples/           # Working example programs (4)
 ├── Makefile            # Primary build system
@@ -177,10 +177,15 @@ celer-mem/
 ## API Quick Reference
 
 ```cpp
-// ── Global convenience API ──
-celer::open(config, tables)    → VoidResult
-celer::db("scope_name")        → Result<DbRef>
-celer::close()                 → VoidResult
+// ── Global convenience API (singleton) ──
+celer::open(factory, tables)       → VoidResult
+celer::db("scope_name")            → Result<DbRef>
+celer::close()                     → VoidResult
+
+// ── Tree builder (instance API — backend-agnostic) ──
+celer::build_tree(factory, tables) → Result<StoreNode>   // full tree
+celer::build_leaf(name, handle)    → Result<StoreNode>   // single leaf
+celer::build_composite(name, kids) → Result<StoreNode>   // composite
 
 // ── DbRef (scope handle) ──
 db.table("name")               → Result<TableRef>
@@ -228,10 +233,18 @@ struct InMemoryBackend {
 
 static_assert(celer::StorageBackend<InMemoryBackend>);
 
-// Use it:
-auto* backend = new InMemoryBackend{};
-auto handle = celer::make_backend_handle(backend);
-auto leaf = celer::build_leaf("my_table", std::move(handle));
+// Wrap it in a BackendFactory — same shape as backends::rocksdb::factory()
+celer::BackendFactory mem_factory = [](std::string_view, std::string_view)
+    -> celer::Result<celer::BackendHandle> {
+    return celer::make_backend_handle(new InMemoryBackend{});
+};
+
+// Works with build_tree (instance API)
+auto tree = celer::build_tree(mem_factory, schema);
+celer::Store store{std::move(*tree), celer::ResourceStack{}};
+
+// Or with the global singleton
+celer::open(mem_factory, schema);
 ```
 
 See `examples/04_custom_backend.cpp` for a complete working implementation.

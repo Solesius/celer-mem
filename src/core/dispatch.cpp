@@ -2,14 +2,11 @@
 
 namespace celer {
 
-// ── Leaf dispatch: forward directly to BackendHandle ──
-// ── Composite dispatch: route via child name prefix separated by ':' ──
-
 namespace {
 
 auto find_child(const CompositeNode& comp, std::string_view child_name)
     -> Result<const StoreNode*> {
-    auto it = comp.index.find(std::string(child_name));
+    auto it = comp.index.find(child_name);
     if (it == comp.index.end()) {
         return std::unexpected(Error{"ChildNotFound",
             "no child '" + std::string(child_name) + "' in composite '" + comp.name + "'"});
@@ -99,8 +96,7 @@ auto node_batch(const StoreNode& node, std::span<const BatchOp> ops)
         if constexpr (std::is_same_v<N, ColumnLeaf>) {
             return n.handle.batch(ops);
         } else {
-            // Group ops by cf_name, dispatch each group to the right child.
-            // For now: forward all ops to each named child as atomic batch.
+            // Group ops by cf_name, dispatch to the matching child.
             std::unordered_map<std::string, std::vector<BatchOp>> grouped;
             for (const auto& op : ops) {
                 grouped[op.cf_name].push_back(op);

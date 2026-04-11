@@ -32,7 +32,6 @@ struct RouteResult {
 } // namespace detail
 
 // ── Dispatch free functions ──
-// Route through the composite tree to the correct leaf BackendHandle.
 
 [[nodiscard]] auto node_get(const StoreNode& node, std::string_view key)
     -> Result<std::optional<std::string>>;

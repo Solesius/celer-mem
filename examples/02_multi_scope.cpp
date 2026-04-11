@@ -28,8 +28,8 @@ int main() {
         {"analytics", "spans"},
     };
 
-    celer::StoreConfig cfg{.path = db_path.string()};
-    auto r = celer::open(cfg, schema);
+    celer::backends::rocksdb::Config cfg{.path = db_path.string()};
+    auto r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     if (!r) { std::cerr << "open: " << r.error().message << "\n"; return 1; }
     std::cout << "✓ Store opened with 2 scopes, 3 tables\n";
 

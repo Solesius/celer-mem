@@ -18,8 +18,8 @@ int main() {
         {"project", "tasks"},
     };
 
-    celer::StoreConfig cfg{.path = db_path.string()};
-    auto open_r = celer::open(cfg, schema);
+    celer::backends::rocksdb::Config cfg{.path = db_path.string()};
+    auto open_r = celer::open(celer::backends::rocksdb::factory(cfg), schema);
     if (!open_r) {
         std::cerr << "open failed: " << open_r.error().message << "\n";
         return 1;

@@ -1,6 +1,5 @@
 #pragma once
 /// Core data types shared across the dispatch and backend layers.
-/// Extracted to break the include cycle: composite → concept → dispatch → composite.
 
 #include <optional>
 #include <span>
@@ -26,5 +25,11 @@ struct BatchOp {
 /// C-style visitor for zero-copy foreach scans.
 /// Called once per key/value pair; cursor lifetime is internal.
 using ScanVisitor = void(*)(void* ctx, std::string_view key, std::string_view value);
+
+/// Scope/table descriptor for tree construction.
+struct TableDescriptor {
+    std::string scope;
+    std::string table;
+};
 
 } // namespace celer

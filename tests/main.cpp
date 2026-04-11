@@ -107,8 +107,8 @@ TEST(test_result_set_basics) {
 TEST(test_rocksdb_create_backend) {
     cleanup("create_backend");
     auto dir = tmp_dir("create_backend");
-    celer::StoreConfig cfg{.path = dir, .create_if_missing = true};
-    auto r = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir, .create_if_missing = true};
+    auto r = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(r.has_value());
     cleanup("create_backend");
 }
@@ -116,8 +116,8 @@ TEST(test_rocksdb_create_backend) {
 TEST(test_rocksdb_put_get_del) {
     cleanup("put_get_del");
     auto dir = tmp_dir("put_get_del");
-    celer::StoreConfig cfg{.path = dir};
-    auto handle = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    auto handle = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     // put
@@ -147,8 +147,8 @@ TEST(test_rocksdb_put_get_del) {
 TEST(test_rocksdb_prefix_scan) {
     cleanup("prefix_scan");
     auto dir = tmp_dir("prefix_scan");
-    celer::StoreConfig cfg{.path = dir};
-    auto handle = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    auto handle = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     ASSERT_OK(handle->put("task:001", "a"));
@@ -171,8 +171,8 @@ TEST(test_rocksdb_prefix_scan) {
 TEST(test_rocksdb_batch) {
     cleanup("batch");
     auto dir = tmp_dir("batch");
-    celer::StoreConfig cfg{.path = dir};
-    auto handle = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    auto handle = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     std::vector<celer::BatchOp> ops{
@@ -201,8 +201,8 @@ TEST(test_rocksdb_batch) {
 TEST(test_rocksdb_foreach_scan) {
     cleanup("foreach");
     auto dir = tmp_dir("foreach");
-    celer::StoreConfig cfg{.path = dir};
-    auto handle = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    auto handle = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     ASSERT_OK(handle->put("a:1", "x"));
@@ -226,8 +226,8 @@ TEST(test_rocksdb_foreach_scan) {
 TEST(test_rocksdb_compact) {
     cleanup("compact");
     auto dir = tmp_dir("compact");
-    celer::StoreConfig cfg{.path = dir};
-    auto handle = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    auto handle = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(handle.has_value());
     ASSERT_OK(handle->put("x", "y"));
     ASSERT_OK(handle->compact());
@@ -241,8 +241,8 @@ TEST(test_rocksdb_compact) {
 TEST(test_tree_dispatch_put_get) {
     cleanup("tree_dispatch");
     auto dir = tmp_dir("tree_dispatch");
-    celer::StoreConfig cfg{.path = dir};
-    auto handle = celer::create_rocksdb_backend(cfg);
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    auto handle = celer::backends::rocksdb::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     auto leaf = celer::build_leaf("tasks", std::move(*handle));
@@ -263,10 +263,10 @@ TEST(test_composite_routing) {
     auto base = tmp_dir("routing");
 
     // Two leaves under one composite
-    celer::StoreConfig cfg1{.path = base + "/tasks"};
-    celer::StoreConfig cfg2{.path = base + "/notes"};
-    auto h1 = celer::create_rocksdb_backend(cfg1);
-    auto h2 = celer::create_rocksdb_backend(cfg2);
+    celer::backends::rocksdb::Config cfg1{.path = base + "/tasks"};
+    celer::backends::rocksdb::Config cfg2{.path = base + "/notes"};
+    auto h1 = celer::backends::rocksdb::factory(cfg1)("_", "_");
+    auto h2 = celer::backends::rocksdb::factory(cfg2)("_", "_");
     assert(h1.has_value() && h2.has_value());
 
     auto l1 = celer::build_leaf("tasks", std::move(*h1));
@@ -301,15 +301,52 @@ TEST(test_composite_routing) {
 // Store → DbRef → TableRef (full API stack)
 // ════════════════════════════════════════
 
+TEST(test_build_tree) {
+    cleanup("build_tree");
+    auto base = tmp_dir("build_tree");
+
+    // build_tree is backend-agnostic — same call for SQLite, RocksDB, anything
+    celer::backends::rocksdb::Config cfg{.path = base};
+    std::vector<celer::TableDescriptor> schema{
+        {"project", "tasks"},
+        {"project", "notes"},
+    };
+
+    auto root = celer::build_tree(celer::backends::rocksdb::factory(cfg), schema);
+    assert(root.has_value());
+
+    celer::Store store{std::move(*root), celer::ResourceStack{}};
+
+    auto db = store.db("project");
+    assert(db.has_value());
+    auto tasks = db->table("tasks");
+    auto notes = db->table("notes");
+    assert(tasks.has_value() && notes.has_value());
+
+    // Write + read isolates across tables
+    ASSERT_OK(tasks->put_raw("t1", "do stuff"));
+    ASSERT_OK(notes->put_raw("n1", "remember stuff"));
+    auto t = tasks->get_raw("t1");
+    auto n = notes->get_raw("n1");
+    assert(t.has_value() && t->has_value() && t->value() == "do stuff");
+    assert(n.has_value() && n->has_value() && n->value() == "remember stuff");
+
+    // Cross-table isolation
+    auto miss = tasks->get_raw("n1");
+    assert(miss.has_value() && !miss->has_value());
+
+    cleanup("build_tree");
+}
+
 TEST(test_store_full_api) {
     cleanup("store_api");
     auto base = tmp_dir("store_api");
 
     // Build tree: root → project → {tasks, notes}
-    celer::StoreConfig cfg_t{.path = base + "/tasks"};
-    celer::StoreConfig cfg_n{.path = base + "/notes"};
-    auto h_t = celer::create_rocksdb_backend(cfg_t);
-    auto h_n = celer::create_rocksdb_backend(cfg_n);
+    celer::backends::rocksdb::Config cfg_t{.path = base + "/tasks"};
+    celer::backends::rocksdb::Config cfg_n{.path = base + "/notes"};
+    auto h_t = celer::backends::rocksdb::factory(cfg_t)("_", "_");
+    auto h_n = celer::backends::rocksdb::factory(cfg_n)("_", "_");
     assert(h_t.has_value() && h_n.has_value());
 
     auto l_t = celer::build_leaf("tasks", std::move(*h_t));
@@ -340,9 +377,6 @@ TEST(test_store_full_api) {
     // Raw string put/get through the handle
     ASSERT_OK(tbl->put<std::string>("t:1", std::string("write tests")));
     auto got = tbl->get<std::string>("t:1");
-    // Note: this will work only if codec_encode/decode for std::string identity-passes.
-    // With the current stub serde, this should return a codec error.
-    // That's acceptable — we test the plumbing, not the serde.
 
     // Scope not found
     auto bad = store.db("nonexistent");
@@ -370,8 +404,8 @@ TEST(test_global_api) {
         {"project", "notes"},
     };
 
-    celer::StoreConfig cfg{.path = dir};
-    ASSERT_OK(celer::open(cfg, tables));
+    celer::backends::rocksdb::Config cfg{.path = dir};
+    ASSERT_OK(celer::open(celer::backends::rocksdb::factory(cfg), tables));
 
     // Navigate
     auto db = celer::db("project");

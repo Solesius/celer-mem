@@ -33,7 +33,9 @@ public:
 
     [[nodiscard]] auto del(std::string_view key) -> celer::VoidResult {
         std::lock_guard lk(mu_);
-        store_.erase(store_.find(key));
+        if (auto it = store_.find(key); it != store_.end()) {
+            store_.erase(it);
+        }
         return {};
     }
 
@@ -83,22 +85,19 @@ static_assert(celer::StorageBackend<InMemoryBackend>,
     "InMemoryBackend must satisfy celer::StorageBackend");
 
 int main() {
-    std::cout << "Custom backend example: InMemoryBackend\n";
+    std::cout << "Custom backend example: InMemoryBackend\n\n";
 
-    // ── 1. Create a BackendHandle from our custom backend ──
-    auto* backend = new InMemoryBackend();
-    auto handle = celer::make_backend_handle<InMemoryBackend>(backend);
+    // ── 1. Define a BackendFactory from the custom backend ──
+    // This is the same shape as celer::backends::rocksdb::factory() returns.
+    // Any backend just needs a lambda: (scope, table) -> Result<BackendHandle>.
+    celer::BackendFactory mem_factory = [](std::string_view /*scope*/, std::string_view /*table*/)
+        -> celer::Result<celer::BackendHandle> {
+        return celer::make_backend_handle<InMemoryBackend>(new InMemoryBackend());
+    };
 
-    // ── 2. Build a tree manually: root → project → tasks ──
-    auto leaf = celer::build_leaf("tasks", std::move(handle));
-    std::vector<celer::StoreNode> leaves;
-    leaves.push_back(std::move(*leaf));
-
-    auto project = celer::build_composite("project", std::move(leaves));
-    std::vector<celer::StoreNode> scopes;
-    scopes.push_back(std::move(*project));
-
-    auto root = celer::build_composite("root", std::move(scopes));
+    // ── 2. build_tree — one call, backend-agnostic ──
+    std::vector<celer::TableDescriptor> schema{{"project", "tasks"}};
+    auto root = celer::build_tree(mem_factory, schema);
 
     // ── 3. Create a Store ──
     celer::Store store{std::move(*root), celer::ResourceStack{}};
@@ -124,6 +123,9 @@ int main() {
     (void)tbl->del("t:3");
     auto after = tbl->prefix<std::string>("t:");
     std::cout << "  after delete: " << after->count() << " tasks\n";
+
+    // ── 5. Also works with open() for the global singleton ──
+    std::cout << "\n  (Also usable with celer::open(mem_factory, schema) — same factory)\n";
 
     std::cout << "✓ Custom backend works — zero disk I/O, full API\n";
     return 0;
