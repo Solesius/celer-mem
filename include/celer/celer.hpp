@@ -1,7 +1,7 @@
 #pragma once
 
 /// celer-mem — Composite-pattern embedded memory framework for C++23
-/// Khalil Warren · MIT License
+/// Khalil Warren · Apache-2.0 License
 
 // Core
 #include "celer/core/result.hpp"
