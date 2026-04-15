@@ -36,12 +36,12 @@ public:
             if constexpr (std::is_same_v<N, ColumnLeaf>) {
                 return std::unexpected(Error{"InvalidRoot", "root is a leaf, expected composite"});
             } else {
-                auto it = n.index.find(scope_name);
-                if (it == n.index.end()) {
+                auto idx = n.index.find(scope_name);
+                if (!idx) {
                     return std::unexpected(Error{"ScopeNotFound",
                         "scope '" + std::string(scope_name) + "' not found"});
                 }
-                return DbRef{std::string(scope_name), &n.children[it->second]};
+                return DbRef{std::string(scope_name), &n.children[*idx]};
             }
         }, root_);
     }

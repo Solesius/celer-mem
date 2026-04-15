@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "celer/core/result.hpp"
+#include "celer/core/stream.hpp"
 #include "celer/core/types.hpp"
 
 namespace celer {
@@ -29,6 +30,11 @@ concept StorageBackend = requires(B b, std::string_view key, std::string_view va
     { b.batch(ops) }                 -> std::same_as<VoidResult>;
     { b.compact() }                  -> std::same_as<VoidResult>;
     { b.foreach_scan(prefix, visitor, ctx) } -> std::same_as<VoidResult>;
+
+    // Streaming extensions (RFC-002)
+    { b.stream_get(key) }                          -> std::same_as<Result<StreamHandle<char>>>;
+    { b.stream_put(key, std::declval<StreamHandle<char>>()) } -> std::same_as<VoidResult>;
+    { b.stream_scan(prefix) }                      -> std::same_as<Result<StreamHandle<KVPair>>>;
 };
 
 /// Manual vtable — struct of function pointers, ~2ns/call, no heap alloc.
@@ -40,6 +46,9 @@ struct BackendVTable {
     auto (*batch_fn)(void*, std::span<const BatchOp>)                          -> VoidResult;
     auto (*compact_fn)(void*)                                                  -> VoidResult;
     auto (*foreach_scan_fn)(void*, std::string_view, ScanVisitor, void*)       -> VoidResult;
+    auto (*stream_get_fn)(void*, std::string_view)                              -> Result<StreamHandle<char>>;
+    auto (*stream_put_fn)(void*, std::string_view, StreamHandle<char>)          -> VoidResult;
+    auto (*stream_scan_fn)(void*, std::string_view)                             -> Result<StreamHandle<KVPair>>;
     void (*destroy_fn)(void*);
 };
 
@@ -108,6 +117,21 @@ struct BackendHandle {
         if (!valid()) return std::unexpected(Error{"BackendHandle", "use-after-move or default-constructed"});
         return vtable->foreach_scan_fn(ctx, prefix, visitor, user_ctx);
     }
+
+    [[nodiscard]] auto stream_get(std::string_view key) const -> Result<StreamHandle<char>> {
+        if (!valid()) return std::unexpected(Error{"BackendHandle", "use-after-move or default-constructed"});
+        return vtable->stream_get_fn(ctx, key);
+    }
+
+    [[nodiscard]] auto stream_put(std::string_view key, StreamHandle<char> stream) const -> VoidResult {
+        if (!valid()) return std::unexpected(Error{"BackendHandle", "use-after-move or default-constructed"});
+        return vtable->stream_put_fn(ctx, key, std::move(stream));
+    }
+
+    [[nodiscard]] auto stream_scan(std::string_view prefix) const -> Result<StreamHandle<KVPair>> {
+        if (!valid()) return std::unexpected(Error{"BackendHandle", "use-after-move or default-constructed"});
+        return vtable->stream_scan_fn(ctx, prefix);
+    }
 };
 
 /// Build a vtable + handle for any type satisfying StorageBackend.
@@ -135,6 +159,15 @@ template <StorageBackend B>
         },
         .foreach_scan_fn = [](void* c, std::string_view p, ScanVisitor v, void* u) -> VoidResult {
             return static_cast<B*>(c)->foreach_scan(p, v, u);
+        },
+        .stream_get_fn = [](void* c, std::string_view k) -> Result<StreamHandle<char>> {
+            return static_cast<B*>(c)->stream_get(k);
+        },
+        .stream_put_fn = [](void* c, std::string_view k, StreamHandle<char> s) -> VoidResult {
+            return static_cast<B*>(c)->stream_put(k, std::move(s));
+        },
+        .stream_scan_fn = [](void* c, std::string_view p) -> Result<StreamHandle<KVPair>> {
+            return static_cast<B*>(c)->stream_scan(p);
         },
         .destroy_fn = [](void* c) {
             delete static_cast<B*>(c);

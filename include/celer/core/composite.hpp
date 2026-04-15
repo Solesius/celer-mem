@@ -1,24 +1,15 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
 #include "celer/backend/concept.hpp"
+#include "celer/core/symbol_table.hpp"
 
 namespace celer {
-
-/// Transparent hasher — allows unordered_map::find(string_view) without allocating.
-struct StringHash {
-    using is_transparent = void;
-    auto operator()(std::string_view sv) const noexcept -> std::size_t {
-        return std::hash<std::string_view>{}(sv);
-    }
-};
 
 struct ColumnLeaf;
 struct CompositeNode;
@@ -34,9 +25,9 @@ struct ColumnLeaf {
 };
 
 struct CompositeNode {
-    std::string                                                      name;
-    std::vector<StoreNode>                                           children;
-    std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>>  index;
+    std::string                name;
+    std::vector<StoreNode>     children;
+    FlatSymbolTable            index;   // power-of-two memoized symbol table
 };
 
 /// Extract the name from any StoreNode variant.

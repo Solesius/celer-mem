@@ -7,10 +7,8 @@ auto build_leaf(std::string name, BackendHandle handle) -> Result<StoreNode> {
 }
 
 auto build_composite(std::string name, std::vector<StoreNode> children) -> Result<StoreNode> {
-    std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> index;
-    for (std::size_t i = 0; i < children.size(); ++i) {
-        index[node_name(children[i])] = i;
-    }
+    auto index = FlatSymbolTable::build_indexed(children,
+        [](const StoreNode& n) -> std::string_view { return node_name(n); });
     return StoreNode{CompositeNode{std::move(name), std::move(children), std::move(index)}};
 }
 
