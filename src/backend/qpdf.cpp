@@ -144,6 +144,8 @@ struct QPDFGetStream {
     std::string       table_name;
     std::string       key;
     bool              done{false};
+    /// Whether the key was found in the PDF dict (set on first pull).
+    bool              found{false};
     /// Cached value after first materialization (also used by Prototype clone).
     std::optional<std::string> cached_value;
 
@@ -182,20 +184,21 @@ struct QPDFGetStream {
                 return std::optional<Chunk<char>>{};
             }
             cached_value = obj.getStringValue();
+            found = true;
         }
 
         done = true;
-        if (cached_value->empty()) {
-            return std::optional<Chunk<char>>{};
-        }
+        // Emit the value as a chunk (even if empty — an empty chunk signals
+        // "key exists with empty value", distinguishable from nullopt = "key
+        // not found" at the stream level).
         std::vector<char> chars(cached_value->begin(), cached_value->end());
         return std::optional{Chunk<char>::from(std::move(chars))};
     }
 
     QPDFGetStream(QPDFScopeStatePtr s, std::string tbl, std::string k,
-                  bool d, std::optional<std::string> cv)
+                  bool d, bool f, std::optional<std::string> cv)
         : state(std::move(s)), table_name(std::move(tbl)), key(std::move(k))
-        , done(d), cached_value(std::move(cv)) {}
+        , done(d), found(f), cached_value(std::move(cv)) {}
 
     QPDFGetStream(const QPDFGetStream&) = default;
 };
@@ -265,9 +268,11 @@ struct QPDFScanStream {
         }
 
         auto end = std::min(cursor + kChunkSize, snapshot->size());
+        auto begin_it = snapshot->begin() + static_cast<std::ptrdiff_t>(cursor);
+        auto end_it   = snapshot->begin() + static_cast<std::ptrdiff_t>(end);
         std::vector<KVPair> chunk_data(
-            std::make_move_iterator(snapshot->begin() + static_cast<std::ptrdiff_t>(cursor)),
-            std::make_move_iterator(snapshot->begin() + static_cast<std::ptrdiff_t>(end)));
+            std::make_move_iterator(begin_it),
+            std::make_move_iterator(end_it));
         cursor = end;
 
         if (cursor >= snapshot->size()) done = true;
@@ -326,7 +331,7 @@ auto QPDFBackend::stream_get(std::string_view key) -> Result<StreamHandle<char>>
         return std::unexpected(Error{"QPDFStreamGet", "backend is closed"});
     }
     auto* impl = new QPDFGetStream{state_, table_name_, std::string(key),
-                                   false, std::nullopt};
+                                   false, false, std::nullopt};
     return make_stream_handle<char>(impl);
 }
 
