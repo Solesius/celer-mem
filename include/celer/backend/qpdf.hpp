@@ -105,7 +105,9 @@ public:
     [[nodiscard]] auto compact() -> VoidResult;
     [[nodiscard]] auto foreach_scan(std::string_view prefix, ScanVisitor visitor, void* user_ctx) -> VoidResult;
 
-    // Streaming extensions (RFC-002) — default materializing stubs.
+    // Streaming extensions (RFC-002) — native pull-based implementations.
+    // stream_get / stream_scan are the primary data path; materializing
+    // methods (get, prefix_scan, foreach_scan) delegate to these.
     [[nodiscard]] auto stream_get(std::string_view key) -> Result<StreamHandle<char>>;
     [[nodiscard]] auto stream_put(std::string_view key, StreamHandle<char> stream) -> VoidResult;
     [[nodiscard]] auto stream_scan(std::string_view prefix) -> Result<StreamHandle<KVPair>>;

@@ -127,7 +127,170 @@ auto QPDFScopeState::flush_locked() -> VoidResult {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// Native stream implementations (Prototype-clonable)
+//
+// These are the primary data path for the QPDF backend.
+// Materializing methods (get, prefix_scan, foreach_scan) delegate here.
+// ══════════════════════════════════════════════════════════════════════
+
+namespace {
+
+/// Pull-based stream over a single PDF string value.
+/// On first pull(), reads the value from the PDF dictionary under the mutex.
+/// Returns one chunk, then Done.  Prototype clone captures a snapshot of
+/// the value so the clone is independent of the PDF object lifecycle.
+struct QPDFGetStream {
+    QPDFScopeStatePtr state;
+    std::string       table_name;
+    std::string       key;
+    bool              done{false};
+    /// Cached value after first materialization (also used by Prototype clone).
+    std::optional<std::string> cached_value;
+
+    auto pull() -> Result<std::optional<Chunk<char>>> {
+        if (done) return std::optional<Chunk<char>>{};
+
+        // If we don't have a cached value yet, read from the PDF dict.
+        if (!cached_value) {
+            if (!state || !state->pdf) {
+                return std::unexpected(Error{"QPDFStreamGet", "backend is closed"});
+            }
+
+            std::lock_guard lock(state->mu);
+            auto& pdf = *state->pdf;
+            auto root = pdf.getRoot();
+
+            if (!root.hasKey("/CelerKV")) {
+                done = true;
+                return std::optional<Chunk<char>>{};
+            }
+            auto celer_kv = root.getKey("/CelerKV");
+            auto table_key = encode_pdf_name(table_name);
+            if (!celer_kv.hasKey(table_key)) {
+                done = true;
+                return std::optional<Chunk<char>>{};
+            }
+            auto table_dict = celer_kv.getKey(table_key);
+            auto pdf_key = encode_pdf_name(key);
+            if (!table_dict.hasKey(pdf_key)) {
+                done = true;
+                return std::optional<Chunk<char>>{};
+            }
+            auto obj = table_dict.getKey(pdf_key);
+            if (!obj.isString()) {
+                done = true;
+                return std::optional<Chunk<char>>{};
+            }
+            cached_value = obj.getStringValue();
+        }
+
+        done = true;
+        if (cached_value->empty()) {
+            return std::optional<Chunk<char>>{};
+        }
+        std::vector<char> chars(cached_value->begin(), cached_value->end());
+        return std::optional{Chunk<char>::from(std::move(chars))};
+    }
+
+    QPDFGetStream(QPDFScopeStatePtr s, std::string tbl, std::string k,
+                  bool d, std::optional<std::string> cv)
+        : state(std::move(s)), table_name(std::move(tbl)), key(std::move(k))
+        , done(d), cached_value(std::move(cv)) {}
+
+    QPDFGetStream(const QPDFGetStream&) = default;
+};
+
+/// Pull-based stream over PDF dictionary entries matching a prefix.
+/// On first pull(), snapshots matching KV pairs from the PDF dict (sorted),
+/// then emits them in fixed-size chunks.  Prototype clone captures the
+/// snapshot so the clone is independent.
+struct QPDFScanStream {
+    QPDFScopeStatePtr state;
+    std::string       table_name;
+    std::string       prefix;
+    bool              done{false};
+    /// Materialized snapshot of matching pairs (sorted by key).
+    std::optional<std::vector<KVPair>> snapshot;
+    /// Current position within the snapshot.
+    std::size_t       cursor{0};
+    /// Maximum pairs per chunk (controls granularity).
+    static constexpr std::size_t kChunkSize = 64;
+
+    auto pull() -> Result<std::optional<Chunk<KVPair>>> {
+        if (done) return std::optional<Chunk<KVPair>>{};
+
+        // Lazy snapshot: read from PDF on first pull.
+        if (!snapshot) {
+            if (!state || !state->pdf) {
+                return std::unexpected(Error{"QPDFStreamScan", "backend is closed"});
+            }
+
+            std::lock_guard lock(state->mu);
+            auto& pdf = *state->pdf;
+            auto root = pdf.getRoot();
+
+            std::vector<KVPair> pairs;
+
+            if (root.hasKey("/CelerKV")) {
+                auto celer_kv = root.getKey("/CelerKV");
+                auto table_key = encode_pdf_name(table_name);
+                if (celer_kv.hasKey(table_key)) {
+                    auto table_dict = celer_kv.getKey(table_key);
+                    auto keys = table_dict.getKeys();
+
+                    for (const auto& pdf_key : keys) {
+                        auto decoded = decode_pdf_name(pdf_key);
+                        if (prefix.empty() || decoded.starts_with(prefix)) {
+                            auto obj = table_dict.getKey(pdf_key);
+                            if (obj.isString()) {
+                                pairs.push_back(KVPair{
+                                    std::move(decoded), obj.getStringValue()});
+                            }
+                        }
+                    }
+                    std::sort(pairs.begin(), pairs.end(),
+                              [](const KVPair& a, const KVPair& b) {
+                                  return a.key < b.key;
+                              });
+                }
+            }
+
+            snapshot = std::move(pairs);
+        }
+
+        // Emit the next chunk of pairs from the snapshot.
+        if (cursor >= snapshot->size()) {
+            done = true;
+            return std::optional<Chunk<KVPair>>{};
+        }
+
+        auto end = std::min(cursor + kChunkSize, snapshot->size());
+        std::vector<KVPair> chunk_data(
+            std::make_move_iterator(snapshot->begin() + static_cast<std::ptrdiff_t>(cursor)),
+            std::make_move_iterator(snapshot->begin() + static_cast<std::ptrdiff_t>(end)));
+        cursor = end;
+
+        if (cursor >= snapshot->size()) done = true;
+        return std::optional{Chunk<KVPair>::from(std::move(chunk_data))};
+    }
+
+    QPDFScanStream(QPDFScopeStatePtr s, std::string tbl, std::string pfx,
+                   bool d, std::optional<std::vector<KVPair>> snap,
+                   std::size_t cur)
+        : state(std::move(s)), table_name(std::move(tbl)), prefix(std::move(pfx))
+        , done(d), snapshot(std::move(snap)), cursor(cur) {}
+
+    QPDFScanStream(const QPDFScanStream&) = default;
+};
+
+} // anonymous namespace
+
+// ══════════════════════════════════════════════════════════════════════
 // QPDFBackend — StorageBackend implementation
+//
+// Streaming methods (stream_get, stream_scan) are the primary data path.
+// Materializing methods (get, prefix_scan, foreach_scan) delegate to streams,
+// following the same architecture as the S3 backend.
 // ══════════════════════════════════════════════════════════════════════
 
 auto QPDFBackend::get_table_dict_locked() -> QPDFObjectHandle {
@@ -156,24 +319,42 @@ auto QPDFBackend::get_table_dict_locked() -> QPDFObjectHandle {
     return table_dict;
 }
 
-auto QPDFBackend::get(std::string_view key) -> Result<std::optional<std::string>> {
+// ── Streaming extensions (RFC-002) — native pull-based implementations ──
+
+auto QPDFBackend::stream_get(std::string_view key) -> Result<StreamHandle<char>> {
     if (!state_ || !state_->pdf) {
-        return std::unexpected(Error{"QPDFGet", "backend is closed"});
+        return std::unexpected(Error{"QPDFStreamGet", "backend is closed"});
     }
+    auto* impl = new QPDFGetStream{state_, table_name_, std::string(key),
+                                   false, std::nullopt};
+    return make_stream_handle<char>(impl);
+}
 
-    std::lock_guard lock(state_->mu);
-    auto table_dict = get_table_dict_locked();
-    auto pdf_key = encode_pdf_name(key);
+auto QPDFBackend::stream_put(std::string_view key, StreamHandle<char> input) -> VoidResult {
+    // PDF string objects are atomic — collect the full stream then write.
+    auto collected = stream::collect_string(input);
+    if (!collected) return std::unexpected(collected.error());
+    return put(key, *collected);
+}
 
-    if (!table_dict.hasKey(pdf_key)) {
-        return std::optional<std::string>{std::nullopt};
+auto QPDFBackend::stream_scan(std::string_view prefix) -> Result<StreamHandle<KVPair>> {
+    if (!state_ || !state_->pdf) {
+        return std::unexpected(Error{"QPDFStreamScan", "backend is closed"});
     }
+    auto* impl = new QPDFScanStream{state_, table_name_, std::string(prefix),
+                                    false, std::nullopt, 0};
+    return make_stream_handle<KVPair>(impl);
+}
 
-    auto obj = table_dict.getKey(pdf_key);
-    if (obj.isString()) {
-        return std::optional<std::string>{obj.getStringValue()};
-    }
-    return std::optional<std::string>{std::nullopt};
+// ── Materializing methods — delegate to streaming ──
+
+auto QPDFBackend::get(std::string_view key) -> Result<std::optional<std::string>> {
+    auto s = stream_get(key);
+    if (!s) return std::unexpected(s.error());
+    auto collected = stream::collect_string(*s);
+    if (!collected) return std::unexpected(collected.error());
+    if (collected->empty()) return std::optional<std::string>{std::nullopt};
+    return std::optional<std::string>{std::move(*collected)};
 }
 
 auto QPDFBackend::put(std::string_view key, std::string_view value) -> VoidResult {
@@ -210,30 +391,9 @@ auto QPDFBackend::del(std::string_view key) -> VoidResult {
 }
 
 auto QPDFBackend::prefix_scan(std::string_view prefix) -> Result<std::vector<KVPair>> {
-    if (!state_ || !state_->pdf) {
-        return std::unexpected(Error{"QPDFScan", "backend is closed"});
-    }
-
-    std::lock_guard lock(state_->mu);
-    auto table_dict = get_table_dict_locked();
-    auto keys = table_dict.getKeys();
-
-    std::vector<KVPair> results;
-    for (const auto& pdf_key : keys) {
-        auto decoded = decode_pdf_name(pdf_key);
-        if (prefix.empty() || decoded.starts_with(prefix)) {
-            auto obj = table_dict.getKey(pdf_key);
-            if (obj.isString()) {
-                results.push_back(KVPair{std::move(decoded), obj.getStringValue()});
-            }
-        }
-    }
-
-    // Sort by key for consistent ordering (PDF dictionaries are unordered)
-    std::sort(results.begin(), results.end(),
-              [](const KVPair& a, const KVPair& b) { return a.key < b.key; });
-
-    return results;
+    auto s = stream_scan(prefix);
+    if (!s) return std::unexpected(s.error());
+    return stream::collect(*s);
 }
 
 auto QPDFBackend::batch(std::span<const BatchOp> ops) -> VoidResult {
@@ -279,32 +439,11 @@ auto QPDFBackend::compact() -> VoidResult {
 
 auto QPDFBackend::foreach_scan(std::string_view prefix, ScanVisitor visitor, void* user_ctx)
     -> VoidResult {
-    if (!state_ || !state_->pdf) {
-        return std::unexpected(Error{"QPDFForeach", "backend is closed"});
-    }
-
-    std::lock_guard lock(state_->mu);
-    auto table_dict = get_table_dict_locked();
-    auto keys = table_dict.getKeys();
-
-    // Collect and sort for deterministic order
-    std::vector<std::pair<std::string, std::string>> pairs;
-    for (const auto& pdf_key : keys) {
-        auto decoded = decode_pdf_name(pdf_key);
-        if (prefix.empty() || decoded.starts_with(prefix)) {
-            auto obj = table_dict.getKey(pdf_key);
-            if (obj.isString()) {
-                pairs.emplace_back(std::move(decoded), obj.getStringValue());
-            }
-        }
-    }
-    std::sort(pairs.begin(), pairs.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-
-    for (const auto& [k, v] : pairs) {
-        visitor(user_ctx, k, v);
-    }
-    return {};
+    auto s = stream_scan(prefix);
+    if (!s) return std::unexpected(s.error());
+    return stream::drain(*s, [&](const KVPair& kv) {
+        visitor(user_ctx, kv.key, kv.value);
+    });
 }
 
 auto QPDFBackend::close() -> VoidResult {
@@ -315,27 +454,6 @@ auto QPDFBackend::close() -> VoidResult {
         if (!r) return r;
     }
     return {};
-}
-
-// ── Streaming stubs (RFC-002) — default implementations via materialization ──
-
-auto QPDFBackend::stream_get(std::string_view key) -> Result<StreamHandle<char>> {
-    auto r = get(key);
-    if (!r) return std::unexpected(r.error());
-    if (!r->has_value()) return stream::empty<char>();
-    return stream::from_string(std::move(r->value()));
-}
-
-auto QPDFBackend::stream_put(std::string_view key, StreamHandle<char> input) -> VoidResult {
-    auto collected = stream::collect_string(input);
-    if (!collected) return std::unexpected(collected.error());
-    return put(key, *collected);
-}
-
-auto QPDFBackend::stream_scan(std::string_view prefix) -> Result<StreamHandle<KVPair>> {
-    auto r = prefix_scan(prefix);
-    if (!r) return std::unexpected(r.error());
-    return stream::from_vector(std::move(*r));
 }
 
 // ══════════════════════════════════════════════════════════════════════
