@@ -6,12 +6,12 @@ namespace {
 
 auto find_child(const CompositeNode& comp, std::string_view child_name)
     -> Result<const StoreNode*> {
-    auto it = comp.index.find(child_name);
-    if (it == comp.index.end()) {
+    auto idx = comp.index.find(child_name);
+    if (!idx) {
         return std::unexpected(Error{"ChildNotFound",
             "no child '" + std::string(child_name) + "' in composite '" + comp.name + "'"});
     }
-    return &comp.children[it->second];
+    return &comp.children[*idx];
 }
 
 } // namespace

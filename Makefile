@@ -42,6 +42,7 @@ OBJS := $(SRCS:$(SRCDIR)/%.cpp=$(BUILDDIR)/%.o)
 TEST_BIN      := $(BUILDDIR)/celer_tests
 INTEG_BIN     := $(BUILDDIR)/celer_integration
 SQLITE_BIN    := $(BUILDDIR)/celer_sqlite_tests
+ASYNC_BIN     := $(BUILDDIR)/celer_async_tests
 
 # ── Example binaries ──
 EX_SRCS := $(wildcard $(EXDIR)/*.cpp)
@@ -50,7 +51,7 @@ EX_BINS := $(EX_SRCS:$(EXDIR)/%.cpp=$(BUILDDIR)/examples/%)
 # ── Library ──
 LIB := $(BUILDDIR)/libceler.a
 
-.PHONY: all clean test integration test-sqlite examples dirs install uninstall check-headers
+.PHONY: all clean test integration test-sqlite test-async examples dirs install uninstall check-headers
 
 all: dirs $(LIB)
 	@echo "✓ libceler.a built successfully"
@@ -85,6 +86,12 @@ test-sqlite: dirs $(LIB) $(SQLITE_BIN)
 $(SQLITE_BIN): $(TESTDIR)/test_sqlite.cpp $(LIB)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+
+# ── Async tests (uses gtest via CMake FetchContent) ──
+test-async:
+	@cmake -S . -B $(BUILDDIR)/cmake -DCELER_BUILD_TESTS=ON -DCELER_BUILD_EXAMPLES=OFF 2>&1 | tail -1
+	@cmake --build $(BUILDDIR)/cmake --target celer_async_tests -j$$(nproc) 2>&1 | tail -1
+	$(BUILDDIR)/cmake/celer_async_tests
 
 # ── Examples ──
 examples: dirs $(LIB) $(EX_BINS)

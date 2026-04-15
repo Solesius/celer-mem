@@ -395,6 +395,29 @@ auto SQLiteBackend::close() -> VoidResult {
     return {};
 }
 
+// ── Streaming stubs (RFC-002) — default implementations via materialization ──
+// These satisfy the StorageBackend concept. Future enhancement: native
+// chunked SQLite cursors for true streaming without full materialization.
+
+auto SQLiteBackend::stream_get(std::string_view key) -> Result<StreamHandle<char>> {
+    auto r = get(key);
+    if (!r) return std::unexpected(r.error());
+    if (!r->has_value()) return stream::empty<char>();
+    return stream::from_string(std::move(r->value()));
+}
+
+auto SQLiteBackend::stream_put(std::string_view key, StreamHandle<char> input) -> VoidResult {
+    auto collected = stream::collect_string(input);
+    if (!collected) return std::unexpected(collected.error());
+    return put(key, *collected);
+}
+
+auto SQLiteBackend::stream_scan(std::string_view prefix) -> Result<StreamHandle<KVPair>> {
+    auto r = prefix_scan(prefix);
+    if (!r) return std::unexpected(r.error());
+    return stream::from_vector(std::move(*r));
+}
+
 namespace {
 
 /// Open (or reuse) a scope-level SQLite database at path/<scope>.db.

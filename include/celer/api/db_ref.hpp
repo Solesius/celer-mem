@@ -31,12 +31,12 @@ public:
                 // Direct leaf — table_name is ignored, we're already at the leaf.
                 return TableRef{std::string(table_name), &n.handle};
             } else {
-                auto it = n.index.find(std::string(table_name));
-                if (it == n.index.end()) {
+                auto idx = n.index.find(table_name);
+                if (!idx) {
                     return std::unexpected(Error{"TableNotFound",
                         "table '" + std::string(table_name) + "' not found in scope '" + scope_name_ + "'"});
                 }
-                const auto& child = n.children[it->second];
+                const auto& child = n.children[*idx];
                 return std::visit([&](const auto& c) -> Result<TableRef> {
                     using C = std::decay_t<decltype(c)>;
                     if constexpr (std::is_same_v<C, ColumnLeaf>) {

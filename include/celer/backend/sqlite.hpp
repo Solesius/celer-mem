@@ -72,6 +72,12 @@ public:
     [[nodiscard]] auto batch(std::span<const BatchOp> ops) -> VoidResult;
     [[nodiscard]] auto compact() -> VoidResult;
     [[nodiscard]] auto foreach_scan(std::string_view prefix, ScanVisitor visitor, void* user_ctx) -> VoidResult;
+
+    // Streaming extensions (RFC-002) — default materializing stubs.
+    [[nodiscard]] auto stream_get(std::string_view key) -> Result<StreamHandle<char>>;
+    [[nodiscard]] auto stream_put(std::string_view key, StreamHandle<char> stream) -> VoidResult;
+    [[nodiscard]] auto stream_scan(std::string_view prefix) -> Result<StreamHandle<KVPair>>;
+
     auto close() -> VoidResult;
 
 private:

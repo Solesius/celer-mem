@@ -9,9 +9,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(celer STATIC
     src/core/dispatch.cpp
     src/core/tree_builder.cpp
+    src/core/aws_credentials.cpp
     src/backend/rocksdb.cpp
     src/backend/sqlite.cpp
     src/backend/dynamic.cpp
+    src/backend/s3.cpp
     src/api/global.cpp
 )
 
@@ -46,6 +48,36 @@ else()
     target_link_libraries(celer PUBLIC sqlite3)
 endif()
 
+# ── Google Test ──
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# ── AWS SDK for C++ (S3 + STS) ──
+option(CELER_BUILD_S3 "Build with AWS S3 support" ON)
+if(CELER_BUILD_S3)
+    set(BUILD_ONLY "s3;sts" CACHE STRING "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(AUTORUN_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(MINIMIZE_SIZE ON CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        awssdk
+        GIT_REPOSITORY https://github.com/aws/aws-sdk-cpp.git
+        GIT_TAG        1.11.370
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(awssdk)
+
+    target_link_libraries(celer PUBLIC aws-cpp-sdk-s3 aws-cpp-sdk-sts aws-cpp-sdk-core)
+endif()
+
 # ── Tests ──
 option(CELER_BUILD_TESTS "Build unit tests" ON)
 if(CELER_BUILD_TESTS)
@@ -65,6 +97,16 @@ if(CELER_BUILD_TESTS)
     target_link_libraries(celer_sqlite_tests PRIVATE celer)
     target_compile_options(celer_sqlite_tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME sqlite COMMAND celer_sqlite_tests)
+
+    add_executable(celer_async_tests tests/test_async.cpp)
+    target_link_libraries(celer_async_tests PRIVATE celer GTest::gtest_main)
+    target_compile_options(celer_async_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME async COMMAND celer_async_tests)
+
+    add_executable(celer_s3_integ tests/test_s3_integ.cpp)
+    target_link_libraries(celer_s3_integ PRIVATE celer GTest::gtest)
+    target_compile_options(celer_s3_integ PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+    add_test(NAME s3_integ COMMAND celer_s3_integ)
 endif()
 
 # ── Examples ──
