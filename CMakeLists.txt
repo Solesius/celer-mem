@@ -103,10 +103,13 @@ if(CELER_BUILD_TESTS)
     target_compile_options(celer_async_tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME async COMMAND celer_async_tests)
 
-    add_executable(celer_s3_integ tests/test_s3_integ.cpp)
-    target_link_libraries(celer_s3_integ PRIVATE celer GTest::gtest)
-    target_compile_options(celer_s3_integ PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
-    add_test(NAME s3_integ COMMAND celer_s3_integ)
+    # option(LOCAL_DEV_INTEGRATION_SUITE "Build local-dev integration tests (S3 integ, requires AWS creds)" OFF)
+    # if(LOCAL_DEV_INTEGRATION_SUITE)
+    #     add_executable(celer_s3_integ tests/test_s3_integ.cpp)
+    #     target_link_libraries(celer_s3_integ PRIVATE celer GTest::gtest)
+    #     target_compile_options(celer_s3_integ PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+    #     add_test(NAME s3_integ COMMAND celer_s3_integ)
+    # endif()
 endif()
 
 # ── Examples ──

@@ -160,6 +160,7 @@ private:
 
             std::unique_lock lock(wake_mutex_);
             wake_cv_.wait_for(lock, std::chrono::microseconds(100), [this] {
+                std::lock_guard sub_lock(submission_mutex_);
                 return shutdown_.load(std::memory_order_acquire)
                     || !submission_queue_.empty();
             });

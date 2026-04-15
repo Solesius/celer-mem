@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -461,7 +462,7 @@ template <typename T>
                 result.insert(result.end(), r.chunk.begin(), r.chunk.end());
                 continue;
             case PollKind::Pending:
-                // Busy-wait for terminal collection
+                std::this_thread::yield();
                 continue;
             case PollKind::Yield:
                 continue;

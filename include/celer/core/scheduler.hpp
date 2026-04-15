@@ -113,8 +113,8 @@ public:
     ChaseLevDeque(ChaseLevDeque&&) = delete;
     auto operator=(ChaseLevDeque&&) -> ChaseLevDeque& = delete;
 
-    /// Owner push (LIFO end). Never fails.
-    void push(StreamLease lease) noexcept {
+    /// Owner push (LIFO end). Grows buffer if full.
+    void push(StreamLease lease) {
         auto b = bottom_.load(std::memory_order_relaxed);
         auto t = top_.load(std::memory_order_acquire);
         auto* buf = buffer_.load(std::memory_order_relaxed);
@@ -122,7 +122,7 @@ public:
         if (b - t > buf->mask) [[unlikely]] {
             auto* nb = buf->grow(t, b);
             old_buffers_.push_back(buf);
-            buffer_.store(nb, std::memory_order_release);
+            buffer_.store(nb, std::memory_order_release); 
             buf = nb;
         }
 
@@ -173,7 +173,8 @@ public:
 
         if (t >= b) [[unlikely]] return std::nullopt;
 
-        auto lease = buffer_.load(std::memory_order_relaxed)->get(t);
+        auto* buf = buffer_.load(std::memory_order_acquire);
+        auto lease = buf->get(t);
         if (!top_.compare_exchange_strong(t, t + 1,
                 std::memory_order_seq_cst, std::memory_order_relaxed)) [[unlikely]] {
             return std::nullopt;
@@ -200,7 +201,7 @@ public:
 /// Lock-based is acceptable here because global queue access is the
 /// cold path — the hot path is local deque push/pop.
 class GlobalQueue {
-    std::mutex mtx_;
+    mutable std::mutex mtx_;
     std::vector<StreamLease> queue_;
 
 public:
@@ -218,7 +219,7 @@ public:
     }
 
     [[nodiscard]] auto empty() const -> bool {
-        // Intentionally not locked — used for approximation in shutdown draining
+        std::lock_guard lock(mtx_);
         return queue_.empty();
     }
 };
@@ -231,7 +232,7 @@ public:
 /// worker's deque — they're waiting for an I/O completion or demand grant
 /// to call wake(). This is NOT the hot path.
 class ParkingLot {
-    std::mutex mtx_;
+    mutable std::mutex mtx_;
     std::vector<StreamLease> parked_;
 
 public:
@@ -255,7 +256,7 @@ public:
     }
 
     [[nodiscard]] auto count() const -> std::size_t {
-        std::lock_guard lock(const_cast<std::mutex&>(mtx_));
+        std::lock_guard lock(mtx_);
         return parked_.size();
     }
 };
@@ -326,7 +327,8 @@ public:
     void wake(void* stream_ctx) {
         auto lease = parking_lot_.wake(stream_ctx);
         if (lease) {
-            schedule_affine(std::move(*lease), lease->worker_affinity);
+            auto affinity = lease->worker_affinity;
+            schedule_affine(std::move(*lease), affinity);
         }
     }
 

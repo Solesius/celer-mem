@@ -124,9 +124,10 @@ public:
 
     /// O(1) slice — structural sharing with parent chunk (refcount bump).
     [[nodiscard]] auto slice(std::size_t off, std::size_t len) const -> Chunk<T> {
-        if (!buf_) return {};
+        if (!buf_ || off >= size()) return {};
+        auto avail = size() - off;
         auto real_off = offset_ + static_cast<uint32_t>(off);
-        auto real_len = static_cast<uint32_t>(std::min(len, size() - off));
+        auto real_len = static_cast<uint32_t>(std::min(len, avail));
         if (real_len == 0) return {};
         buf_->acquire();
         return Chunk<T>{buf_, real_off, real_len};
@@ -454,6 +455,7 @@ struct FlatMapImpl {
     StreamHandle<T> source;
     Fn fn;
     std::optional<StreamHandle<U>> current_sub;
+    std::vector<T> pending_;  // buffered elements from multi-element chunks
 
     auto pull() -> Result<std::optional<Chunk<U>>> {
         while (true) {
@@ -464,30 +466,31 @@ struct FlatMapImpl {
                 if (r->has_value()) return r;
                 current_sub.reset();
             }
-            // Pull next element from source to create sub-stream
+            // Process buffered elements before pulling from source
+            if (!pending_.empty()) {
+                auto elem = std::move(pending_.front());
+                pending_.erase(pending_.begin());
+                current_sub = fn(elem);
+                continue;
+            }
+            // Pull next chunk from source
             auto r = source.pull();
             if (!r) return std::unexpected(r.error());
             if (!r->has_value()) return std::optional<Chunk<U>>{};
-            // For each element in the chunk, flatMap one at a time
-            // (to keep sub-stream semantics correct)
             auto& chunk = r->value();
             if (chunk.empty()) continue;
-            // Process first element; push remaining back as a from_vector source
+            // Process first element; buffer remaining
             current_sub = fn(chunk[0]);
             if (chunk.size() > 1) {
-                // Prepend remaining elements back to source
-                std::vector<T> rest(chunk.begin() + 1, chunk.end());
-                auto rest_stream = from_vector(std::move(rest));
-                // Chain: rest_stream then original source
-                // For simplicity, we just process one element per pull from source
-                // This is correct but may not be maximally efficient
+                pending_.assign(chunk.begin() + 1, chunk.end());
             }
         }
     }
 
     FlatMapImpl(const FlatMapImpl& o)
         : source(o.source.clone()), fn(o.fn)
-        , current_sub(o.current_sub ? std::optional{o.current_sub->clone()} : std::nullopt) {}
+        , current_sub(o.current_sub ? std::optional{o.current_sub->clone()} : std::nullopt)
+        , pending_(o.pending_) {}
     FlatMapImpl(StreamHandle<T> s, Fn f)
         : source(std::move(s)), fn(std::move(f)) {}
 };
@@ -497,11 +500,8 @@ template <typename T, typename Fn>
     -> StreamHandle<typename std::invoke_result_t<Fn, const T&>::value_type>
     requires requires(Fn f, T t) { { f(t) } -> std::same_as<StreamHandle<typename std::invoke_result_t<Fn, const T&>::value_type>>; }
 {
-    // Placeholder: full flat_map requires more careful chunk threading.
-    // For v1, flat_map operates element-by-element.
-    (void)source; (void)fn;
     using U = typename std::invoke_result_t<Fn, const T&>::value_type;
-    return empty<U>();
+    return make_stream_handle<U>(new FlatMapImpl<T, U, Fn>{std::move(source), std::move(fn)});
 }
 
 // ════════════════════════════════════════════════════════════════════

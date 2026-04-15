@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "celer/core/result.hpp"
@@ -87,6 +88,9 @@ inline void write_le32(char* dst, std::uint32_t v) noexcept {
 [[nodiscard]] inline auto compress_block(const char* data, std::size_t size, Codec codec)
     -> Result<std::vector<char>>
 {
+    if (size > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+        return std::unexpected(Error{"Compress", "input exceeds 4 GiB frame limit"});
+    }
     if (codec == Codec::none) {
         std::vector<char> out(4 + size);
         detail::write_le32(out.data(), static_cast<std::uint32_t>(size));
@@ -107,6 +111,9 @@ inline void write_le32(char* dst, std::uint32_t v) noexcept {
 
 #if CELER_HAS_LZ4
     if (codec == Codec::lz4) {
+        if (size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+            return std::unexpected(Error{"Compress", "input exceeds LZ4 int limit"});
+        }
         auto max_dst = LZ4_compressBound(static_cast<int>(size));
         std::vector<char> out(4 + static_cast<std::size_t>(max_dst));
         detail::write_le32(out.data(), static_cast<std::uint32_t>(size));
@@ -132,6 +139,11 @@ inline void write_le32(char* dst, std::uint32_t v) noexcept {
         return std::unexpected(Error{"Decompress", "frame too short (< 4 bytes)"});
     }
     auto original_size = detail::read_le32(data);
+    static constexpr std::uint32_t max_decompress_size = 256u * 1024u * 1024u; // 256 MiB
+    if (original_size > max_decompress_size) {
+        return std::unexpected(Error{"Decompress",
+            "claimed original size exceeds 256 MiB safety limit"});
+    }
     const char* body = data + 4;
     auto body_size = size - 4;
 
