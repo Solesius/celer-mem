@@ -16,6 +16,13 @@ else
   HAS_SQLITE := 0
 endif
 
+# Auto-detect QPDF. Override with CELER_NO_QPDF=1 to force off.
+ifndef CELER_NO_QPDF
+  HAS_QPDF := $(shell printf '\043include <qpdf/QPDF.hh>\n' | $(CXX) $(CPPFLAGS) -x c++ -fsyntax-only - 2>/dev/null && echo 1 || echo 0)
+else
+  HAS_QPDF := 0
+endif
+
 LDFLAGS := -lpthread
 
 ifeq ($(HAS_ROCKSDB),1)
@@ -26,6 +33,12 @@ endif
 
 ifeq ($(HAS_SQLITE),1)
   LDFLAGS += -lsqlite3
+endif
+
+ifeq ($(HAS_QPDF),1)
+  LDFLAGS += -lqpdf
+else
+  CPPFLAGS += -DCELER_FORCE_NO_QPDF
 endif
 
 PREFIX    ?= /usr/local
@@ -42,6 +55,7 @@ OBJS := $(SRCS:$(SRCDIR)/%.cpp=$(BUILDDIR)/%.o)
 TEST_BIN      := $(BUILDDIR)/celer_tests
 INTEG_BIN     := $(BUILDDIR)/celer_integration
 SQLITE_BIN    := $(BUILDDIR)/celer_sqlite_tests
+QPDF_BIN      := $(BUILDDIR)/celer_qpdf_tests
 ASYNC_BIN     := $(BUILDDIR)/celer_async_tests
 
 # ── Example binaries ──
@@ -51,7 +65,7 @@ EX_BINS := $(EX_SRCS:$(EXDIR)/%.cpp=$(BUILDDIR)/examples/%)
 # ── Library ──
 LIB := $(BUILDDIR)/libceler.a
 
-.PHONY: all clean test integration test-sqlite test-async examples dirs install uninstall check-headers
+.PHONY: all clean test integration test-sqlite test-qpdf test-async examples dirs install uninstall check-headers
 
 all: dirs $(LIB)
 	@echo "✓ libceler.a built successfully"
@@ -84,6 +98,14 @@ test-sqlite: dirs $(LIB) $(SQLITE_BIN)
 	$(SQLITE_BIN)
 
 $(SQLITE_BIN): $(TESTDIR)/test_sqlite.cpp $(LIB)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+
+# ── QPDF tests ──
+test-qpdf: dirs $(LIB) $(QPDF_BIN)
+	$(QPDF_BIN)
+
+$(QPDF_BIN): $(TESTDIR)/test_qpdf.cpp $(LIB)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 

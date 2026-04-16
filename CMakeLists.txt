@@ -14,6 +14,7 @@ add_library(celer STATIC
     src/backend/sqlite.cpp
     src/backend/dynamic.cpp
     src/backend/s3.cpp
+    src/backend/qpdf.cpp
     src/api/global.cpp
 )
 
@@ -46,6 +47,14 @@ if(PkgConfig_FOUND)
     endif()
 else()
     target_link_libraries(celer PUBLIC sqlite3)
+endif()
+
+# ── QPDF dependency (optional) ──
+if(PkgConfig_FOUND)
+    pkg_check_modules(QPDF IMPORTED_TARGET libqpdf)
+    if(QPDF_FOUND)
+        target_link_libraries(celer PUBLIC PkgConfig::QPDF)
+    endif()
 endif()
 
 # ── Google Test ──
@@ -102,6 +111,11 @@ if(CELER_BUILD_TESTS)
     target_link_libraries(celer_async_tests PRIVATE celer GTest::gtest_main)
     target_compile_options(celer_async_tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME async COMMAND celer_async_tests)
+
+    add_executable(celer_qpdf_tests tests/test_qpdf.cpp)
+    target_link_libraries(celer_qpdf_tests PRIVATE celer)
+    target_compile_options(celer_qpdf_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME qpdf COMMAND celer_qpdf_tests)
 
     # option(LOCAL_DEV_INTEGRATION_SUITE "Build local-dev integration tests (S3 integ, requires AWS creds)" OFF)
     # if(LOCAL_DEV_INTEGRATION_SUITE)
