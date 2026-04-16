@@ -103,6 +103,11 @@ if(CELER_BUILD_TESTS)
     target_compile_options(celer_async_tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME async COMMAND celer_async_tests)
 
+    add_executable(celer_necto_tests tests/test_necto.cpp)
+    target_link_libraries(celer_necto_tests PRIVATE celer GTest::gtest_main)
+    target_compile_options(celer_necto_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME necto COMMAND celer_necto_tests)
+
     # option(LOCAL_DEV_INTEGRATION_SUITE "Build local-dev integration tests (S3 integ, requires AWS creds)" OFF)
     # if(LOCAL_DEV_INTEGRATION_SUITE)
     #     add_executable(celer_s3_integ tests/test_s3_integ.cpp)
@@ -112,14 +117,43 @@ if(CELER_BUILD_TESTS)
     # endif()
 endif()
 
+# ── nlohmann/json (for LLM swarm example) ──
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    GIT_SHALLOW    TRUE
+)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(nlohmann_json)
+
 # ── Examples ──
 option(CELER_BUILD_EXAMPLES "Build example programs" OFF)
 if(CELER_BUILD_EXAMPLES)
+    find_package(CURL REQUIRED)
+
     file(GLOB EXAMPLE_SOURCES examples/*.cpp)
     foreach(src ${EXAMPLE_SOURCES})
         get_filename_component(name ${src} NAME_WE)
         add_executable(example_${name} ${src})
         target_link_libraries(example_${name} PRIVATE celer)
+    endforeach()
+
+    # LLM swarm example needs libcurl + nlohmann/json
+    if(TARGET example_08_llm_swarm)
+        target_link_libraries(example_08_llm_swarm PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
+    endif()
+endif()
+
+# ── Visualizations ──
+option(CELER_BUILD_VIZ "Build visualization tools" OFF)
+if(CELER_BUILD_VIZ)
+    file(GLOB VIZ_SOURCES viz/*.cpp)
+    foreach(src ${VIZ_SOURCES})
+        get_filename_component(name ${src} NAME_WE)
+        add_executable(viz_${name} ${src})
+        target_link_libraries(viz_${name} PRIVATE celer)
+        target_compile_options(viz_${name} PRIVATE -Wall -Wextra -Wpedantic)
     endforeach()
 endif()
 
