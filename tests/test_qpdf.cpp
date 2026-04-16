@@ -33,7 +33,8 @@ class QpdfBackendTest : public ::testing::Test {
 protected:
     void SetUp() override {
         cleanup("availability_probe");
-        auto probe = celer::backends::qpdf::factory({.path = tmp_dir("availability_probe")})("_", "_");
+        auto probe = celer::backends::qpdf::factory({.path = tmp_dir("availability_probe")})(
+            kProbeScope, kProbeTable);
         ASSERT_HAS_VALUE_OR_SKIP_NOT_AVAILABLE(probe);
         cleanup("availability_probe");
     }
@@ -435,4 +436,3 @@ TEST(test_qpdf_binary_values) {
 
     cleanup("binary");
 }
-

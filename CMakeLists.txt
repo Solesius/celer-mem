@@ -155,7 +155,7 @@ if(CELER_BUILD_TESTS)
                 ${CELER_COVERAGE_DIR}/coverage.filtered.info
                 --output-directory ${CELER_COVERAGE_DIR}/html
                 --legend
-                --title celer-mem\ coverage
+                --title "celer-mem coverage"
             DEPENDS
                 celer_tests
                 celer_integration

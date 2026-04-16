@@ -37,7 +37,8 @@ class RocksDbIntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
         nuke("availability_probe");
-        auto probe = celer::backends::rocksdb::factory({.path = fresh("availability_probe")})("_", "_");
+        auto probe = celer::backends::rocksdb::factory({.path = fresh("availability_probe")})(
+            kProbeScope, kProbeTable);
         ASSERT_HAS_VALUE_OR_SKIP_NOT_AVAILABLE(probe);
         nuke("availability_probe");
     }
@@ -324,4 +325,3 @@ IT(should_handle_concurrent_reads) {
     celer::close();
     nuke(tag);
 }
-

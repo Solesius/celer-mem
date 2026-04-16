@@ -32,7 +32,8 @@ class SQLiteBackendTest : public ::testing::Test {
 protected:
     void SetUp() override {
         cleanup("availability_probe");
-        auto probe = celer::backends::sqlite::factory({.path = tmp_dir("availability_probe")})("_", "_");
+        auto probe = celer::backends::sqlite::factory({.path = tmp_dir("availability_probe")})(
+            kProbeScope, kProbeTable);
         ASSERT_HAS_VALUE_OR_SKIP_NOT_AVAILABLE(probe);
         cleanup("availability_probe");
     }
@@ -441,4 +442,3 @@ TEST(test_sqlite_rejects_injection_in_table_name) {
 
     cleanup("injection");
 }
-
