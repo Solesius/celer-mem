@@ -9,6 +9,8 @@
 #include <iostream>
 #include <string>
 
+#include "test_support.hpp"
+
 namespace fs = std::filesystem;
 
 // ── Helpers ──
@@ -24,20 +26,11 @@ static auto cleanup(const char* name) -> void {
     fs::remove_all(p);
 }
 
-static int pass_count = 0;
-static int fail_count = 0;
+#undef TEST
+#define TEST(name) GTEST_TEST(MainSuite, name)
 
-#define TEST(name) \
-    static auto name() -> void; \
-    struct name##_reg { name##_reg() { \
-        try { name(); ++pass_count; std::cout << "  PASS  " #name "\n"; } \
-        catch (const std::exception& e) { ++fail_count; std::cerr << "  FAIL  " #name ": " << e.what() << "\n"; } \
-        catch (...) { ++fail_count; std::cerr << "  FAIL  " #name ": unknown exception\n"; } \
-    } } name##_inst; \
-    static auto name() -> void
-
-#define ASSERT_OK(expr) do { auto _r_ = (expr); assert(_r_.has_value()); } while(0)
-#define ASSERT_ERR(expr, ecode) do { auto _r_ = (expr); assert(!_r_.has_value()); assert(_r_.error().code == (ecode)); } while(0)
+#define ASSERT_OK(expr) do { auto _r_ = (expr); ASSERT_TRUE(_r_.has_value()) << _r_.error().code << ": " << _r_.error().message; } while(0)
+#define ASSERT_ERR(expr, ecode) do { auto _r_ = (expr); ASSERT_FALSE(_r_.has_value()); ASSERT_EQ(_r_.error().code, (ecode)); } while(0)
 
 // ════════════════════════════════════════
 // Unit tests — pure types, no RocksDB I/O
@@ -103,6 +96,19 @@ TEST(test_result_set_basics) {
 // ════════════════════════════════════════
 // RocksDB backend — raw BackendHandle tests
 // ════════════════════════════════════════
+
+class RocksDbBackendTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        cleanup("availability_probe");
+        auto probe = celer::backends::rocksdb::factory({.path = tmp_dir("availability_probe")})("_", "_");
+        ASSERT_HAS_VALUE_OR_SKIP_NOT_AVAILABLE(probe);
+        cleanup("availability_probe");
+    }
+};
+
+#undef TEST
+#define TEST(name) TEST_F(RocksDbBackendTest, name)
 
 TEST(test_rocksdb_create_backend) {
     cleanup("create_backend");
@@ -430,13 +436,3 @@ TEST(test_global_api) {
     cleanup("global_api");
 }
 
-// ── Entry point ──
-
-int main() {
-    std::cout << "celer-mem test suite (RocksDB integration)\n";
-    std::cout << "───────────────────────────────────────────\n";
-    // Tests auto-register via static construction above.
-    std::cout << "───────────────────────────────────────────\n";
-    std::cout << pass_count << " passed, " << fail_count << " failed\n";
-    return fail_count > 0 ? 1 : 0;
-}

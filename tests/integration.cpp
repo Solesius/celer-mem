@@ -14,6 +14,8 @@
 #include <thread>
 #include <vector>
 
+#include "test_support.hpp"
+
 namespace fs = std::filesystem;
 
 static auto base_path() -> fs::path {
@@ -31,17 +33,17 @@ static auto nuke(const char* name) -> void {
     fs::remove_all(base_path() / name);
 }
 
-static int pass_count = 0;
-static int fail_count = 0;
+class RocksDbIntegrationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        nuke("availability_probe");
+        auto probe = celer::backends::rocksdb::factory({.path = fresh("availability_probe")})("_", "_");
+        ASSERT_HAS_VALUE_OR_SKIP_NOT_AVAILABLE(probe);
+        nuke("availability_probe");
+    }
+};
 
-#define IT(name) \
-    static auto name() -> void; \
-    struct name##_reg { name##_reg() { \
-        try { name(); ++pass_count; std::cout << "  PASS  " #name "\n"; } \
-        catch (const std::exception& e) { ++fail_count; std::cerr << "  FAIL  " #name ": " << e.what() << "\n"; } \
-        catch (...) { ++fail_count; std::cerr << "  FAIL  " #name ": unknown\n"; } \
-    } } name##_inst; \
-    static auto name() -> void
+#define IT(name) TEST_F(RocksDbIntegrationTest, name)
 
 // ════════════════════════════════════════════════════════
 // E2E: Persistence — data survives close/reopen
@@ -323,13 +325,3 @@ IT(should_handle_concurrent_reads) {
     nuke(tag);
 }
 
-// ── Entry point ──
-
-int main() {
-    std::cout << "celer-mem integration test suite\n";
-    std::cout << "════════════════════════════════════\n";
-    // Tests auto-register via static construction.
-    std::cout << "════════════════════════════════════\n";
-    std::cout << pass_count << " passed, " << fail_count << " failed\n";
-    return fail_count > 0 ? 1 : 0;
-}
