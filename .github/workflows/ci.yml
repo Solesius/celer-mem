@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsqlite3-dev \
+            librocksdb-dev \
+            libqpdf-dev \
+            ninja-build \
+            pkg-config
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCELER_BUILD_TESTS=ON
+          -DCELER_BUILD_EXAMPLES=OFF
+          -DCELER_BUILD_S3=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Check headers
+        run: make check-headers
+
+  coverage:
+    runs-on: ubuntu-24.04
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            lcov \
+            libsqlite3-dev \
+            librocksdb-dev \
+            libqpdf-dev \
+            ninja-build \
+            pkg-config
+
+      - name: Configure coverage build
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCELER_BUILD_TESTS=ON
+          -DCELER_BUILD_EXAMPLES=OFF
+          -DCELER_BUILD_S3=OFF
+          -DCELER_ENABLE_COVERAGE=ON
+
+      - name: Generate HTML coverage report
+        run: cmake --build build --target coverage --parallel
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: build/coverage/html
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/coverage/html
+
+  deploy-coverage:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    needs: coverage
+    permissions:
+      contents: read
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deployment
+        uses: actions/deploy-pages@v4

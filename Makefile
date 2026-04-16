@@ -46,6 +46,8 @@ SRCDIR    := src
 BUILDDIR  := build
 TESTDIR   := tests
 EXDIR     := examples
+CMAKE_BUILDDIR := $(BUILDDIR)/cmake
+CMAKE_FLAGS    := -DCELER_BUILD_TESTS=ON -DCELER_BUILD_EXAMPLES=OFF -DCELER_BUILD_S3=OFF
 
 # ── Sources ──
 SRCS := $(shell find $(SRCDIR) -name '*.cpp')
@@ -65,7 +67,7 @@ EX_BINS := $(EX_SRCS:$(EXDIR)/%.cpp=$(BUILDDIR)/examples/%)
 # ── Library ──
 LIB := $(BUILDDIR)/libceler.a
 
-.PHONY: all clean test integration test-sqlite test-qpdf test-async examples dirs install uninstall check-headers
+.PHONY: all clean cmake-configure test test-all integration test-sqlite test-qpdf test-async coverage examples dirs install uninstall check-headers
 
 all: dirs $(LIB)
 	@echo "✓ libceler.a built successfully"
@@ -77,43 +79,43 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-# ── Unit tests ──
-test: dirs $(LIB) $(TEST_BIN)
-	$(TEST_BIN)
+# ── CMake/CTest-backed test targets ──
+cmake-configure:
+	cmake -S . -B $(CMAKE_BUILDDIR) $(CMAKE_FLAGS)
 
-$(TEST_BIN): $(TESTDIR)/main.cpp $(LIB)
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+# ── Unit tests ──
+test: cmake-configure
+	cmake --build $(CMAKE_BUILDDIR) --target celer_tests -j$$(nproc)
+	ctest --test-dir $(CMAKE_BUILDDIR) -L unit --output-on-failure
+
+test-all: cmake-configure
+	cmake --build $(CMAKE_BUILDDIR) -j$$(nproc)
+	ctest --test-dir $(CMAKE_BUILDDIR) --output-on-failure
 
 # ── Integration tests ──
-integration: dirs $(LIB) $(INTEG_BIN)
-	$(INTEG_BIN)
-
-$(INTEG_BIN): $(TESTDIR)/integration.cpp $(LIB)
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+integration: cmake-configure
+	cmake --build $(CMAKE_BUILDDIR) --target celer_integration -j$$(nproc)
+	ctest --test-dir $(CMAKE_BUILDDIR) -L integration --output-on-failure
 
 # ── SQLite tests ──
-test-sqlite: dirs $(LIB) $(SQLITE_BIN)
-	$(SQLITE_BIN)
-
-$(SQLITE_BIN): $(TESTDIR)/test_sqlite.cpp $(LIB)
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+test-sqlite: cmake-configure
+	cmake --build $(CMAKE_BUILDDIR) --target celer_sqlite_tests -j$$(nproc)
+	ctest --test-dir $(CMAKE_BUILDDIR) -L sqlite --output-on-failure
 
 # ── QPDF tests ──
-test-qpdf: dirs $(LIB) $(QPDF_BIN)
-	$(QPDF_BIN)
+test-qpdf: cmake-configure
+	cmake --build $(CMAKE_BUILDDIR) --target celer_qpdf_tests -j$$(nproc)
+	ctest --test-dir $(CMAKE_BUILDDIR) -L qpdf --output-on-failure
 
-$(QPDF_BIN): $(TESTDIR)/test_qpdf.cpp $(LIB)
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+# ── Async tests ──
+test-async: cmake-configure
+	cmake --build $(CMAKE_BUILDDIR) --target celer_async_tests -j$$(nproc)
+	ctest --test-dir $(CMAKE_BUILDDIR) -L async --output-on-failure
 
-# ── Async tests (uses gtest via CMake FetchContent) ──
-test-async:
-	@cmake -S . -B $(BUILDDIR)/cmake -DCELER_BUILD_TESTS=ON -DCELER_BUILD_EXAMPLES=OFF 2>&1 | tail -1
-	@cmake --build $(BUILDDIR)/cmake --target celer_async_tests -j$$(nproc) 2>&1 | tail -1
-	$(BUILDDIR)/cmake/celer_async_tests
+# ── Coverage ──
+coverage:
+	cmake -S . -B $(CMAKE_BUILDDIR) $(CMAKE_FLAGS) -DCELER_ENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+	cmake --build $(CMAKE_BUILDDIR) --target coverage -j$$(nproc)
 
 # ── Examples ──
 examples: dirs $(LIB) $(EX_BINS)

@@ -5,6 +5,15 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(CELER_ENABLE_COVERAGE "Enable gcov/lcov coverage instrumentation" OFF)
+if(CELER_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR "CELER_ENABLE_COVERAGE requires GCC or Clang")
+    endif()
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
+endif()
+
 # ── Library ──
 add_library(celer STATIC
     src/core/dispatch.cpp
@@ -66,6 +75,7 @@ FetchContent_Declare(
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
+include(GoogleTest)
 
 # ── AWS SDK for C++ (S3 + STS) ──
 option(CELER_BUILD_S3 "Build with AWS S3 support" ON)
@@ -92,30 +102,21 @@ option(CELER_BUILD_TESTS "Build unit tests" ON)
 if(CELER_BUILD_TESTS)
     enable_testing()
 
-    add_executable(celer_tests tests/main.cpp)
-    target_link_libraries(celer_tests PRIVATE celer)
-    target_compile_options(celer_tests PRIVATE -Wall -Wextra -Wpedantic)
-    add_test(NAME unit COMMAND celer_tests)
+    function(celer_add_gtest target source label)
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE celer GTest::gtest_main)
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        gtest_discover_tests(${target}
+            DISCOVERY_MODE PRE_TEST
+            PROPERTIES LABELS "${label}"
+        )
+    endfunction()
 
-    add_executable(celer_integration tests/integration.cpp)
-    target_link_libraries(celer_integration PRIVATE celer)
-    target_compile_options(celer_integration PRIVATE -Wall -Wextra -Wpedantic)
-    add_test(NAME integration COMMAND celer_integration)
-
-    add_executable(celer_sqlite_tests tests/test_sqlite.cpp)
-    target_link_libraries(celer_sqlite_tests PRIVATE celer)
-    target_compile_options(celer_sqlite_tests PRIVATE -Wall -Wextra -Wpedantic)
-    add_test(NAME sqlite COMMAND celer_sqlite_tests)
-
-    add_executable(celer_async_tests tests/test_async.cpp)
-    target_link_libraries(celer_async_tests PRIVATE celer GTest::gtest_main)
-    target_compile_options(celer_async_tests PRIVATE -Wall -Wextra -Wpedantic)
-    add_test(NAME async COMMAND celer_async_tests)
-
-    add_executable(celer_qpdf_tests tests/test_qpdf.cpp)
-    target_link_libraries(celer_qpdf_tests PRIVATE celer)
-    target_compile_options(celer_qpdf_tests PRIVATE -Wall -Wextra -Wpedantic)
-    add_test(NAME qpdf COMMAND celer_qpdf_tests)
+    celer_add_gtest(celer_tests tests/main.cpp unit)
+    celer_add_gtest(celer_integration tests/integration.cpp integration)
+    celer_add_gtest(celer_sqlite_tests tests/test_sqlite.cpp sqlite)
+    celer_add_gtest(celer_async_tests tests/test_async.cpp async)
+    celer_add_gtest(celer_qpdf_tests tests/test_qpdf.cpp qpdf)
 
     # option(LOCAL_DEV_INTEGRATION_SUITE "Build local-dev integration tests (S3 integ, requires AWS creds)" OFF)
     # if(LOCAL_DEV_INTEGRATION_SUITE)
@@ -124,6 +125,46 @@ if(CELER_BUILD_TESTS)
     #     target_compile_options(celer_s3_integ PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
     #     add_test(NAME s3_integ COMMAND celer_s3_integ)
     # endif()
+
+    if(CELER_ENABLE_COVERAGE)
+        find_program(LCOV_EXECUTABLE lcov)
+        find_program(GENHTML_EXECUTABLE genhtml)
+        if(NOT LCOV_EXECUTABLE OR NOT GENHTML_EXECUTABLE)
+            message(FATAL_ERROR "CELER_ENABLE_COVERAGE requires lcov and genhtml")
+        endif()
+
+        set(CELER_COVERAGE_DIR ${CMAKE_BINARY_DIR}/coverage)
+        add_custom_target(coverage
+            COMMAND ${CMAKE_COMMAND} -E rm -rf ${CELER_COVERAGE_DIR}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CELER_COVERAGE_DIR}
+            COMMAND ${LCOV_EXECUTABLE} --directory ${CMAKE_BINARY_DIR} --zerocounters
+            COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+            COMMAND ${LCOV_EXECUTABLE}
+                --capture
+                --directory ${CMAKE_BINARY_DIR}
+                --output-file ${CELER_COVERAGE_DIR}/coverage.info
+                --ignore-errors mismatch,negative,source
+            COMMAND ${LCOV_EXECUTABLE}
+                --remove ${CELER_COVERAGE_DIR}/coverage.info
+                /usr/*
+                ${CMAKE_BINARY_DIR}/_deps/*
+                ${CMAKE_SOURCE_DIR}/tests/*
+                --output-file ${CELER_COVERAGE_DIR}/coverage.filtered.info
+                --ignore-errors unused
+            COMMAND ${GENHTML_EXECUTABLE}
+                ${CELER_COVERAGE_DIR}/coverage.filtered.info
+                --output-directory ${CELER_COVERAGE_DIR}/html
+                --legend
+                --title celer-mem\ coverage
+            DEPENDS
+                celer_tests
+                celer_integration
+                celer_sqlite_tests
+                celer_async_tests
+                celer_qpdf_tests
+            USES_TERMINAL
+        )
+    endif()
 endif()
 
 # ── Examples ──
