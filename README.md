@@ -82,7 +82,7 @@ make test-qpdf
 make test-async
 make test-all
 
-# Generate HTML coverage locally (build/coverage/html/index.html)
+# Generate HTML coverage locally (build/cmake/coverage/html/index.html)
 make coverage
 
 # Build example programs
