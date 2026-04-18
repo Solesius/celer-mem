@@ -1064,7 +1064,6 @@ TEST(Scheduler, DrainRemainingOnShutdown) {
     for (int i = 0; i < 32; ++i) {
         auto control = std::make_unique<StreamControl>();
         control->request(10);
-        int sentinel_addr = i;  // any non-null distinct address-bearer
         StreamLease lease;
         lease.stream_ctx = &controls;  // any non-null
         lease.vtable = reinterpret_cast<const void*>(0x1);
@@ -1072,7 +1071,6 @@ TEST(Scheduler, DrainRemainingOnShutdown) {
         lease.control = control.get();
         sched.schedule_affine(std::move(lease), 0);
         controls.push_back(std::move(control));
-        (void)sentinel_addr;
     }
     sched.shutdown();
     // All leases should have been drained and polled.
