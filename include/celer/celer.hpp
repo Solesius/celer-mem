@@ -40,3 +40,6 @@
 #include "celer/api/db_ref.hpp"
 #include "celer/api/store.hpp"
 #include "celer/api/global.hpp"
+
+// Materialization (RFC-005) — cross-store join + materialize
+#include "celer/materialization.hpp"

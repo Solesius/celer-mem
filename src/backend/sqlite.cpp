@@ -418,6 +418,77 @@ auto SQLiteBackend::stream_scan(std::string_view prefix) -> Result<StreamHandle<
     return stream::from_vector(std::move(*r));
 }
 
+// ── Batch get (RFC-005) — native IN-clause prepared statement ──
+//
+// SQLite has a default SQLITE_LIMIT_VARIABLE_NUMBER of 999 (older builds) or
+// 32766 (newer builds). We chunk into batches of 256 to stay well under both
+// while still amortizing the prepare cost across many keys.
+auto SQLiteBackend::get_many(std::span<const std::string_view> keys)
+    -> Result<std::vector<BatchGetItem>> {
+    if (!db_) return std::unexpected(Error{"SQLiteGetMany", "db is closed"});
+    const auto n = keys.size();
+    std::vector<BatchGetItem> out;
+    out.reserve(n);
+    if (n == 0) return out;
+
+    // Result map: key -> value (sqlite IN does not preserve order).
+    std::unordered_map<std::string_view, std::optional<std::string>> found;
+    found.reserve(n);
+
+    constexpr std::size_t kChunk = 256;
+    auto tbl = quote_ident(table_name_);
+
+    for (std::size_t base = 0; base < n; base += kChunk) {
+        const auto cnt = std::min(kChunk, n - base);
+        std::string sql = "SELECT key, value FROM " + tbl + " WHERE key IN (";
+        for (std::size_t i = 0; i < cnt; ++i) sql += (i == 0 ? "?" : ",?");
+        sql += ")";
+
+        ::sqlite3_stmt* raw_stmt = nullptr;
+        int rc = ::sqlite3_prepare_v2(db_.get(), sql.c_str(), -1, &raw_stmt, nullptr);
+        StmtGuard guard(raw_stmt);
+        if (rc != SQLITE_OK) {
+            return std::unexpected(Error{"SQLiteGetMany", ::sqlite3_errmsg(db_.get())});
+        }
+        for (std::size_t i = 0; i < cnt; ++i) {
+            auto k = keys[base + i];
+            ::sqlite3_bind_text(raw_stmt, static_cast<int>(i + 1),
+                                k.data(), static_cast<int>(k.size()), SQLITE_STATIC);
+        }
+        while (true) {
+            rc = ::sqlite3_step(raw_stmt);
+            if (rc == SQLITE_DONE) break;
+            if (rc != SQLITE_ROW) {
+                return std::unexpected(Error{"SQLiteGetMany", ::sqlite3_errmsg(db_.get())});
+            }
+            const auto* kbuf = reinterpret_cast<const char*>(::sqlite3_column_text(raw_stmt, 0));
+            int klen = ::sqlite3_column_bytes(raw_stmt, 0);
+            const auto* vbuf = reinterpret_cast<const char*>(::sqlite3_column_blob(raw_stmt, 1));
+            int vlen = ::sqlite3_column_bytes(raw_stmt, 1);
+            // Match against the live key-view by copying into the lookup map.
+            std::string_view kv{kbuf, static_cast<std::size_t>(klen)};
+            // We have to find the matching input key_view (same content) to use as the map key.
+            for (std::size_t i = 0; i < cnt; ++i) {
+                if (keys[base + i] == kv) {
+                    found.emplace(keys[base + i],
+                                  std::string(vbuf, static_cast<std::size_t>(vlen)));
+                    break;
+                }
+            }
+        }
+    }
+
+    for (auto k : keys) {
+        auto it = found.find(k);
+        if (it == found.end()) {
+            out.push_back(BatchGetItem{std::string(k), std::nullopt});
+        } else {
+            out.push_back(BatchGetItem{std::string(k), std::move(it->second)});
+        }
+    }
+    return out;
+}
+
 namespace {
 
 /// Open (or reuse) a scope-level SQLite database at path/<scope>.db.
