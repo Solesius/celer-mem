@@ -1,5 +1,8 @@
 # celer-mem
 
+[![CI](https://github.com/Solesius/celer-mem/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Solesius/celer-mem/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fsolesius.github.io%2Fceler-mem%2Fbadge.json)](https://solesius.github.io/celer-mem/)
+
 A fast, embeddable, backend-agnostic memory store for C++23. Built for anyone looking for flexible storage in c++ land.
 
 ```cpp
@@ -292,8 +295,17 @@ The repository ships with a GitHub Actions pipeline that:
 
 - builds and runs every GoogleTest suite on pull requests and `main`
 - generates an HTML coverage report with `lcov` + `genhtml`
-- uploads the coverage site as a workflow artifact
-- deploys the coverage HTML to GitHub Pages on pushes to `main`
+- uploads both the HTML site (`coverage-html`) and the raw lcov tracefile
+  (`coverage-lcov`) as workflow artifacts
+- on pushes to `main`, deploys the coverage site to GitHub Pages at
+  <https://solesius.github.io/celer-mem/>, which serves:
+  - `index.html` — the browsable HTML coverage report
+  - `lcov.info` — the raw lcov tracefile (for Codecov, Coveralls, local tooling)
+  - `badge.json` — a [shields.io endpoint](https://shields.io/badges/endpoint-badge)
+    payload powering the coverage badge in this README
+
+The README itself is the project landing page on GitHub; the deployed Pages
+site is dedicated to test coverage.
 
 ## Roadmap
 
