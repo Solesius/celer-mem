@@ -74,11 +74,16 @@ cd celer-mem
 # Build the library
 make
 
-# Run unit tests (18 tests)
+# Run the GoogleTest-backed suites
 make test
-
-# Run integration tests (10 E2E tests)
 make integration
+make test-sqlite
+make test-qpdf
+make test-async
+make test-all
+
+# Generate HTML coverage locally (build/cmake/coverage/html/index.html)
+make coverage
 
 # Build example programs
 make examples
@@ -90,9 +95,13 @@ make check-headers
 ### CMake
 
 ```bash
-cmake -B build -DCELER_BUILD_EXAMPLES=ON
+cmake -S . -B build -DCELER_BUILD_TESTS=ON -DCELER_BUILD_EXAMPLES=ON -DCELER_BUILD_S3=OFF
 cmake --build build
-ctest --test-dir build
+ctest --test-dir build --output-on-failure
+
+# Optional HTML coverage
+cmake -S . -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DCELER_BUILD_TESTS=ON -DCELER_BUILD_EXAMPLES=OFF -DCELER_BUILD_S3=OFF -DCELER_ENABLE_COVERAGE=ON
+cmake --build build-coverage --target coverage
 ```
 
 ## Install
@@ -189,11 +198,15 @@ celer-mem/
 │   └── celer.hpp       # Umbrella header
 ├── src/                # Translation units (5 .cpp files)
 ├── tests/
-│   ├── main.cpp        # Unit tests (18)
-│   └── integration.cpp # E2E integration tests (10)
-├── examples/           # Working example programs (5)
-├── Makefile            # Primary build system
-└── CMakeLists.txt      # CMake alternative
+│   ├── main.cpp         # Core + RocksDB tests (GoogleTest)
+│   ├── integration.cpp  # RocksDB E2E tests (GoogleTest)
+│   ├── test_sqlite.cpp  # SQLite backend tests (GoogleTest)
+│   ├── test_qpdf.cpp    # QPDF backend tests (GoogleTest)
+│   ├── test_async.cpp   # Async/streaming tests (GoogleTest)
+│   └── test_support.hpp # Shared GoogleTest helpers
+├── examples/            # Working example programs (5)
+├── Makefile             # Build + test convenience targets
+└── CMakeLists.txt       # Canonical CMake build/test config
 ```
 
 ## API Quick Reference
@@ -275,27 +288,12 @@ See `examples/04_custom_backend.cpp` for a complete working implementation.
 
 ### GitHub Actions
 
-```yaml
-name: CI
-on: [push, pull_request]
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
-        run: sudo apt-get install -y librocksdb-dev
-      - name: Build
-        run: make
-      - name: Unit tests
-        run: make test
-      - name: Integration tests
-        run: make integration
-      - name: Header check
-        run: make check-headers
-      - name: Examples
-        run: make examples
-```
+The repository ships with a GitHub Actions pipeline that:
+
+- builds and runs every GoogleTest suite on pull requests and `main`
+- generates an HTML coverage report with `lcov` + `genhtml`
+- uploads the coverage site as a workflow artifact
+- deploys the coverage HTML to GitHub Pages on pushes to `main`
 
 ## Roadmap
 
