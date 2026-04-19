@@ -1,4 +1,4 @@
-# RFC 0001: Cross-Store Joins and Materialization
+# RFC 003: Cross-Store Joins and Materialization
 
 Status: Draft  
 Target Project: `celer-mem`  
