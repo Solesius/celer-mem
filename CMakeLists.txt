@@ -14,18 +14,54 @@ if(CELER_ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif()
 
-# ── Library ──
-add_library(celer STATIC
+# ── Optional backend toggles (all default ON; auto-disabled if headers missing) ──
+option(CELER_BUILD_ROCKSDB "Build with RocksDB backend" ON)
+option(CELER_BUILD_QPDF    "Build with QPDF backend"    ON)
+
+find_package(PkgConfig QUIET)
+
+# Probe for RocksDB headers; if not found, silently turn the backend off.
+if(CELER_BUILD_ROCKSDB)
+    include(CheckIncludeFileCXX)
+    set(CMAKE_REQUIRED_FLAGS "-std=c++23")
+    check_include_file_cxx("rocksdb/db.h" CELER_ROCKSDB_HEADER_FOUND)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT CELER_ROCKSDB_HEADER_FOUND)
+        message(STATUS "RocksDB headers not found — disabling RocksDB backend")
+        set(CELER_BUILD_ROCKSDB OFF)
+    endif()
+endif()
+
+# Probe for QPDF headers; if not found, silently turn the backend off.
+if(CELER_BUILD_QPDF)
+    include(CheckIncludeFileCXX)
+    set(CMAKE_REQUIRED_FLAGS "-std=c++23")
+    check_include_file_cxx("qpdf/QPDF.hh" CELER_QPDF_HEADER_FOUND)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT CELER_QPDF_HEADER_FOUND)
+        message(STATUS "QPDF headers not found — disabling QPDF backend")
+        set(CELER_BUILD_QPDF OFF)
+    endif()
+endif()
+
+# ── Library sources ──
+set(CELER_SOURCES
     src/core/dispatch.cpp
     src/core/tree_builder.cpp
     src/core/aws_credentials.cpp
-    src/backend/rocksdb.cpp
     src/backend/sqlite.cpp
     src/backend/dynamic.cpp
     src/backend/s3.cpp
-    src/backend/qpdf.cpp
     src/api/global.cpp
 )
+if(CELER_BUILD_ROCKSDB)
+    list(APPEND CELER_SOURCES src/backend/rocksdb.cpp)
+endif()
+if(CELER_BUILD_QPDF)
+    list(APPEND CELER_SOURCES src/backend/qpdf.cpp)
+endif()
+
+add_library(celer STATIC ${CELER_SOURCES})
 
 target_include_directories(celer PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -33,17 +69,20 @@ target_include_directories(celer PUBLIC
 )
 target_compile_options(celer PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
-# ── RocksDB dependency ──
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(ROCKSDB IMPORTED_TARGET rocksdb)
-    if(ROCKSDB_FOUND)
-        target_link_libraries(celer PUBLIC PkgConfig::ROCKSDB)
+# ── RocksDB dependency (optional) ──
+if(CELER_BUILD_ROCKSDB)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ROCKSDB IMPORTED_TARGET rocksdb)
+        if(ROCKSDB_FOUND)
+            target_link_libraries(celer PUBLIC PkgConfig::ROCKSDB)
+        else()
+            target_link_libraries(celer PUBLIC rocksdb)
+        endif()
     else()
         target_link_libraries(celer PUBLIC rocksdb)
     endif()
 else()
-    target_link_libraries(celer PUBLIC rocksdb)
+    target_compile_definitions(celer PUBLIC CELER_FORCE_NO_ROCKSDB=1)
 endif()
 
 # ── SQLite3 dependency ──
@@ -59,11 +98,17 @@ else()
 endif()
 
 # ── QPDF dependency (optional) ──
-if(PkgConfig_FOUND)
+if(CELER_BUILD_QPDF AND PkgConfig_FOUND)
     pkg_check_modules(QPDF IMPORTED_TARGET libqpdf)
     if(QPDF_FOUND)
         target_link_libraries(celer PUBLIC PkgConfig::QPDF)
+    else()
+        message(STATUS "QPDF not found — disabling QPDF backend")
+        set(CELER_BUILD_QPDF OFF)
     endif()
+endif()
+if(NOT CELER_BUILD_QPDF)
+    target_compile_definitions(celer PUBLIC CELER_FORCE_NO_QPDF=1)
 endif()
 
 # ── Google Test ──
