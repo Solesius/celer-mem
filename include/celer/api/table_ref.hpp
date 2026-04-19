@@ -93,6 +93,12 @@ public:
 
     [[nodiscard]] auto name() const noexcept -> const std::string& { return table_name_; }
 
+    /// Raw handle accessor. Used by celer::materialization::StoreRef<T> and
+    /// other typed lenses that need to dispatch through the BackendHandle
+    /// vtable directly. The returned pointer is non-owning and must not
+    /// outlive the underlying Store.
+    [[nodiscard]] auto handle() const noexcept -> const BackendHandle* { return handle_; }
+
 private:
     std::string            table_name_;
     const BackendHandle*   handle_;

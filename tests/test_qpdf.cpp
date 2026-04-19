@@ -1,5 +1,6 @@
-/// tests/test_sqlite.cpp — SQLite backend tests
-/// Tests the full stack: Store → DbRef → TableRef → BackendHandle → SQLite
+/// tests/test_qpdf.cpp — QPDF backend tests
+/// Tests the full stack: Store → DbRef → TableRef → BackendHandle → QPDF
+/// Mirrors the SQLite test suite for parity.
 
 #include "celer/celer.hpp"
 
@@ -18,21 +19,21 @@ namespace fs = std::filesystem;
 // ── Helpers ──
 
 static auto tmp_dir(const char* name) -> std::string {
-    auto p = fs::temp_directory_path() / "celer_sqlite_test" / name;
+    auto p = fs::temp_directory_path() / "celer_qpdf_test" / name;
     fs::create_directories(p);
     return p.string();
 }
 
 static auto cleanup(const char* name) -> void {
-    auto p = fs::temp_directory_path() / "celer_sqlite_test" / name;
+    auto p = fs::temp_directory_path() / "celer_qpdf_test" / name;
     fs::remove_all(p);
 }
 
-class SQLiteBackendTest : public ::testing::Test {
+class QpdfBackendTest : public ::testing::Test {
 protected:
     void SetUp() override {
         cleanup("availability_probe");
-        auto probe = celer::backends::sqlite::factory({.path = tmp_dir("availability_probe")})(
+        auto probe = celer::backends::qpdf::factory({.path = tmp_dir("availability_probe")})(
             kProbeScope, kProbeTable);
         ASSERT_HAS_VALUE_OR_SKIP_NOT_AVAILABLE(probe);
         cleanup("availability_probe");
@@ -40,29 +41,29 @@ protected:
 };
 
 #undef TEST
-#define TEST(name) TEST_F(SQLiteBackendTest, name)
+#define TEST(name) TEST_F(QpdfBackendTest, name)
 
 #define ASSERT_OK(expr) do { auto _r_ = (expr); ASSERT_TRUE(_r_.has_value()) << _r_.error().code << ": " << _r_.error().message; } while(0)
 #define ASSERT_ERR(expr, ecode) do { auto _r_ = (expr); ASSERT_FALSE(_r_.has_value()); ASSERT_EQ(_r_.error().code, (ecode)); } while(0)
 
 // ════════════════════════════════════════
-// SQLite backend — raw BackendHandle tests
+// QPDF backend — raw BackendHandle tests
 // ════════════════════════════════════════
 
-TEST(test_sqlite_create_backend) {
+TEST(test_qpdf_create_backend) {
     cleanup("create_backend");
     auto dir = tmp_dir("create_backend");
-    celer::backends::sqlite::Config cfg{.path = dir, .create_if_missing = true};
-    auto r = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir, .create_if_missing = true};
+    auto r = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(r.has_value());
     cleanup("create_backend");
 }
 
-TEST(test_sqlite_put_get_del) {
+TEST(test_qpdf_put_get_del) {
     cleanup("put_get_del");
     auto dir = tmp_dir("put_get_del");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     // put
@@ -89,11 +90,11 @@ TEST(test_sqlite_put_get_del) {
     cleanup("put_get_del");
 }
 
-TEST(test_sqlite_overwrite) {
+TEST(test_qpdf_overwrite) {
     cleanup("overwrite");
     auto dir = tmp_dir("overwrite");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     ASSERT_OK(handle->put("k", "v1"));
@@ -104,11 +105,11 @@ TEST(test_sqlite_overwrite) {
     cleanup("overwrite");
 }
 
-TEST(test_sqlite_prefix_scan) {
+TEST(test_qpdf_prefix_scan) {
     cleanup("prefix_scan");
     auto dir = tmp_dir("prefix_scan");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     ASSERT_OK(handle->put("task:001", "a"));
@@ -128,11 +129,11 @@ TEST(test_sqlite_prefix_scan) {
     cleanup("prefix_scan");
 }
 
-TEST(test_sqlite_batch) {
+TEST(test_qpdf_batch) {
     cleanup("batch");
     auto dir = tmp_dir("batch");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     std::vector<celer::BatchOp> ops{
@@ -158,11 +159,11 @@ TEST(test_sqlite_batch) {
     cleanup("batch");
 }
 
-TEST(test_sqlite_foreach_scan) {
+TEST(test_qpdf_foreach_scan) {
     cleanup("foreach");
     auto dir = tmp_dir("foreach");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     ASSERT_OK(handle->put("a:1", "x"));
@@ -183,11 +184,11 @@ TEST(test_sqlite_foreach_scan) {
     cleanup("foreach");
 }
 
-TEST(test_sqlite_compact) {
+TEST(test_qpdf_compact) {
     cleanup("compact");
     auto dir = tmp_dir("compact");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
     ASSERT_OK(handle->put("x", "y"));
     ASSERT_OK(handle->compact());
@@ -195,14 +196,14 @@ TEST(test_sqlite_compact) {
 }
 
 // ════════════════════════════════════════
-// Composite tree + dispatch tests (SQLite)
+// Composite tree + dispatch tests (QPDF)
 // ════════════════════════════════════════
 
-TEST(test_sqlite_tree_dispatch_put_get) {
+TEST(test_qpdf_tree_dispatch_put_get) {
     cleanup("tree_dispatch");
     auto dir = tmp_dir("tree_dispatch");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto handle = celer::backends::sqlite::factory(cfg)("_", "_");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
     assert(handle.has_value());
 
     auto leaf = celer::build_leaf("tasks", std::move(*handle));
@@ -218,20 +219,20 @@ TEST(test_sqlite_tree_dispatch_put_get) {
 }
 
 // ════════════════════════════════════════
-// Store → DbRef → TableRef (full API with SQLite)
+// Store → DbRef → TableRef (full API with QPDF)
 // ════════════════════════════════════════
 
-TEST(test_sqlite_build_tree) {
+TEST(test_qpdf_build_tree) {
     cleanup("build_tree");
     auto base = tmp_dir("build_tree");
 
-    celer::backends::sqlite::Config cfg{.path = base};
+    celer::backends::qpdf::Config cfg{.path = base};
     std::vector<celer::TableDescriptor> schema{
         {"project", "tasks"},
         {"project", "notes"},
     };
 
-    auto root = celer::build_tree(celer::backends::sqlite::factory(cfg), schema);
+    auto root = celer::build_tree(celer::backends::qpdf::factory(cfg), schema);
     assert(root.has_value());
 
     celer::Store store{std::move(*root), celer::ResourceStack{}};
@@ -258,10 +259,10 @@ TEST(test_sqlite_build_tree) {
 }
 
 // ════════════════════════════════════════
-// Global API with SQLite
+// Global API with QPDF
 // ════════════════════════════════════════
 
-TEST(test_sqlite_global_api) {
+TEST(test_qpdf_global_api) {
     cleanup("global_api");
     auto dir = tmp_dir("global_api");
 
@@ -270,8 +271,8 @@ TEST(test_sqlite_global_api) {
         {"project", "notes"},
     };
 
-    celer::backends::sqlite::Config cfg{.path = dir};
-    ASSERT_OK(celer::open(celer::backends::sqlite::factory(cfg), tables));
+    celer::backends::qpdf::Config cfg{.path = dir};
+    ASSERT_OK(celer::open(celer::backends::qpdf::factory(cfg), tables));
 
     auto db = celer::db("project");
     assert(db.has_value());
@@ -293,15 +294,15 @@ TEST(test_sqlite_global_api) {
 // Persistence — data survives close/reopen
 // ════════════════════════════════════════
 
-TEST(test_sqlite_persistence) {
+TEST(test_qpdf_persistence) {
     cleanup("persist");
     auto dir = tmp_dir("persist");
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::backends::sqlite::Config cfg{.path = dir};
+    celer::backends::qpdf::Config cfg{.path = dir};
 
     // Write
     {
-        auto r = celer::open(celer::backends::sqlite::factory(cfg), schema);
+        auto r = celer::open(celer::backends::qpdf::factory(cfg), schema);
         assert(r.has_value());
         auto tbl = celer::db("data")->table("kv");
         (void)tbl->put_raw("greeting", "hello from session 1");
@@ -310,7 +311,7 @@ TEST(test_sqlite_persistence) {
 
     // Re-open and verify
     {
-        auto r = celer::open(celer::backends::sqlite::factory(cfg), schema);
+        auto r = celer::open(celer::backends::qpdf::factory(cfg), schema);
         assert(r.has_value());
         auto tbl = celer::db("data")->table("kv");
         auto got = tbl->get_raw("greeting");
@@ -324,50 +325,16 @@ TEST(test_sqlite_persistence) {
 }
 
 // ════════════════════════════════════════
-// Large dataset — 10K records
+// Concurrent reads (QPDF with mutex)
 // ════════════════════════════════════════
 
-TEST(test_sqlite_10k_records) {
-    cleanup("large_dataset");
-    auto dir = tmp_dir("large_dataset");
-    std::vector<celer::TableDescriptor> schema{{"bench", "data"}};
-    celer::backends::sqlite::Config cfg{.path = dir};
-
-    auto r = celer::open(celer::backends::sqlite::factory(cfg), schema);
-    assert(r.has_value());
-
-    auto tbl = celer::db("bench")->table("data");
-
-    for (int i = 0; i < 10'000; ++i) {
-        auto key = "rec-" + std::to_string(i);
-        auto val = "value-" + std::to_string(i);
-        auto pr  = tbl->put_raw(key, val);
-        assert(pr.has_value());
-    }
-
-    auto all = tbl->all<std::string>();
-    assert(all.has_value());
-    assert(all->count() == 10'000);
-
-    auto r5000 = tbl->get_raw("rec-5000");
-    assert(r5000.has_value() && r5000->has_value());
-    assert(r5000->value() == "value-5000");
-
-    celer::close();
-    cleanup("large_dataset");
-}
-
-// ════════════════════════════════════════
-// Concurrent reads (SQLite with WAL)
-// ════════════════════════════════════════
-
-TEST(test_sqlite_concurrent_reads) {
+TEST(test_qpdf_concurrent_reads) {
     cleanup("concurrent");
     auto dir = tmp_dir("concurrent");
     std::vector<celer::TableDescriptor> schema{{"data", "kv"}};
-    celer::backends::sqlite::Config cfg{.path = dir};
+    celer::backends::qpdf::Config cfg{.path = dir};
 
-    auto r = celer::open(celer::backends::sqlite::factory(cfg), schema);
+    auto r = celer::open(celer::backends::qpdf::factory(cfg), schema);
     assert(r.has_value());
 
     auto tbl = celer::db("data")->table("kv");
@@ -402,43 +369,70 @@ TEST(test_sqlite_concurrent_reads) {
 }
 
 // ════════════════════════════════════════
-// SQL injection protection — validate_ident
+// Validation — rejects bad identifiers
 // ════════════════════════════════════════
 
-TEST(test_sqlite_rejects_injection_in_table_name) {
+TEST(test_qpdf_rejects_injection_in_table_name) {
     cleanup("injection");
     auto dir = tmp_dir("injection");
-    celer::backends::sqlite::Config cfg{.path = dir};
-    auto fac = celer::backends::sqlite::factory(cfg);
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto fac = celer::backends::qpdf::factory(cfg);
 
-    // SQL injection attempt via table name
+    // Injection attempt via table name
     auto r1 = fac("safe_scope", "x; DROP TABLE y --");
     assert(!r1.has_value());
-    assert(r1.error().code == "SQLiteValidation");
+    assert(r1.error().code == "QPDFValidation");
 
     // NUL byte in table name
     auto r2 = fac("safe_scope", std::string_view("ok\0evil", 7));
     assert(!r2.has_value());
-    assert(r2.error().code == "SQLiteValidation");
+    assert(r2.error().code == "QPDFValidation");
 
     // Empty table name
     auto r3 = fac("safe_scope", "");
     assert(!r3.has_value());
-    assert(r3.error().code == "SQLiteValidation");
+    assert(r3.error().code == "QPDFValidation");
 
     // Quotes in table name
     auto r4 = fac("safe_scope", R"(tbl"name)");
     assert(!r4.has_value());
-    assert(r4.error().code == "SQLiteValidation");
+    assert(r4.error().code == "QPDFValidation");
 
     // Bad scope name (path traversal attempt)
     auto r5 = fac("../etc", "tbl");
     assert(!r5.has_value());
-    assert(r5.error().code == "SQLiteValidation");
+    assert(r5.error().code == "QPDFValidation");
 
     // Good names still work
     auto r6 = fac("valid_scope", "valid_table_123");
     assert(r6.has_value());
 
     cleanup("injection");
+}
+
+// ════════════════════════════════════════
+// Binary data round-trip
+// ════════════════════════════════════════
+
+TEST(test_qpdf_binary_values) {
+    cleanup("binary");
+    auto dir = tmp_dir("binary");
+    celer::backends::qpdf::Config cfg{.path = dir};
+    auto handle = celer::backends::qpdf::factory(cfg)("_", "_");
+    assert(handle.has_value());
+
+    // Store binary data with NUL bytes, high bytes, etc.
+    std::string binary_val;
+    binary_val.push_back('\x00');
+    binary_val.push_back('\xFF');
+    binary_val.push_back('\x01');
+    binary_val.append("hello");
+    binary_val.push_back('\x00');
+
+    ASSERT_OK(handle->put("bin_key", binary_val));
+    auto got = handle->get("bin_key");
+    assert(got.has_value() && got->has_value());
+    assert(got->value() == binary_val);
+
+    cleanup("binary");
 }

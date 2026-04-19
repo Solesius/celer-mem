@@ -23,6 +23,7 @@
 #include "celer/backend/concept.hpp"
 #include "celer/backend/rocksdb.hpp"
 #include "celer/backend/sqlite.hpp"
+#include "celer/backend/qpdf.hpp"
 #include "celer/backend/s3.hpp"
 #include "celer/backend/dynamic.hpp"
 
@@ -49,3 +50,6 @@
 #include "celer/necto/swarm/cluster.hpp"
 #include "celer/necto/swarm/swarm.hpp"
 #include "celer/api/global.hpp"
+
+// Materialization (RFC-005) — cross-store join + materialize
+#include "celer/materialization.hpp"

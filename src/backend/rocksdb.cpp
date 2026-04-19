@@ -126,6 +126,34 @@ auto RocksDBBackend::stream_scan(std::string_view prefix) -> Result<StreamHandle
     return stream::from_vector(std::move(*r));
 }
 
+// ── Batch get (RFC-005) — native MultiGet ──
+auto RocksDBBackend::get_many(std::span<const std::string_view> keys)
+    -> Result<std::vector<BatchGetItem>> {
+    if (!db_) return std::unexpected(Error{"RocksDBGetMany", "backend not open"});
+    const auto n = keys.size();
+    std::vector<BatchGetItem> out;
+    out.reserve(n);
+    if (n == 0) return out;
+
+    std::vector<::rocksdb::Slice>   slices;
+    std::vector<std::string>        values(n);
+    slices.reserve(n);
+    for (auto k : keys) slices.emplace_back(k.data(), k.size());
+
+    auto statuses = db_->MultiGet(::rocksdb::ReadOptions{}, slices, &values);
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& s = statuses[i];
+        if (s.ok()) {
+            out.push_back(BatchGetItem{std::string(keys[i]), std::move(values[i])});
+        } else if (s.IsNotFound()) {
+            out.push_back(BatchGetItem{std::string(keys[i]), std::nullopt});
+        } else {
+            return std::unexpected(Error{"RocksDBGetMany", s.ToString()});
+        }
+    }
+    return out;
+}
+
 namespace {
 
 /// Open a single RocksDB instance at the resolved path.

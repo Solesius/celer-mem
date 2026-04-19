@@ -279,6 +279,27 @@ public:
         return {};
     }
 
+    // ── Streaming stubs (RFC-002) — materialize via get/put/prefix_scan ──
+
+    [[nodiscard]] auto stream_get(std::string_view key) -> celer::Result<celer::StreamHandle<char>> {
+        auto r = get(key);
+        if (!r) return std::unexpected(r.error());
+        if (!r->has_value()) return celer::stream::empty<char>();
+        return celer::stream::from_string(std::move(r->value()));
+    }
+
+    [[nodiscard]] auto stream_put(std::string_view key, celer::StreamHandle<char> input) -> celer::VoidResult {
+        auto collected = celer::stream::collect_string(input);
+        if (!collected) return std::unexpected(collected.error());
+        return put(key, *collected);
+    }
+
+    [[nodiscard]] auto stream_scan(std::string_view prefix) -> celer::Result<celer::StreamHandle<celer::KVPair>> {
+        auto r = prefix_scan(prefix);
+        if (!r) return std::unexpected(r.error());
+        return celer::stream::from_vector(std::move(*r));
+    }
+
 private:
     std::map<std::string, std::string, std::less<>> store_;
     std::mutex mu_;

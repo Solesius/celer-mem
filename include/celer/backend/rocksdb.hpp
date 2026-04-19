@@ -72,6 +72,9 @@ public:
     [[nodiscard]] auto stream_put(std::string_view key, StreamHandle<char> stream) -> VoidResult;
     [[nodiscard]] auto stream_scan(std::string_view prefix) -> Result<StreamHandle<KVPair>>;
 
+    // Batch get (RFC-005) — native MultiGet.
+    [[nodiscard]] auto get_many(std::span<const std::string_view> keys) -> Result<std::vector<BatchGetItem>>;
+
     auto close() -> VoidResult;
 
 private:

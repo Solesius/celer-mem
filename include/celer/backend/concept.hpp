@@ -15,6 +15,13 @@
 
 namespace celer {
 
+// ── BatchGetResult: structured response for batch lookups (RFC-005) ──
+
+struct BatchGetItem {
+    std::string                 key;     ///< requested key, in input order
+    std::optional<std::string>  value;   ///< nullopt = miss
+};
+
 // ── StorageBackend concept ──
 
 template <typename B>
@@ -37,6 +44,14 @@ concept StorageBackend = requires(B b, std::string_view key, std::string_view va
     { b.stream_scan(prefix) }                      -> std::same_as<Result<StreamHandle<KVPair>>>;
 };
 
+// ── HasNativeBatchGet: opt-in capability for backends that implement native
+// multi-key lookup (RocksDB MultiGet, SQLite IN-clause, etc). Backends without
+// this capability transparently use a loop over get() via the vtable shim.
+template <typename B>
+concept HasNativeBatchGet = requires(B b, std::span<const std::string_view> keys) {
+    { b.get_many(keys) } -> std::same_as<Result<std::vector<BatchGetItem>>>;
+};
+
 /// Manual vtable — struct of function pointers, ~2ns/call, no heap alloc.
 struct BackendVTable {
     auto (*get_fn)(void*, std::string_view)                                    -> Result<std::optional<std::string>>;
@@ -49,6 +64,8 @@ struct BackendVTable {
     auto (*stream_get_fn)(void*, std::string_view)                              -> Result<StreamHandle<char>>;
     auto (*stream_put_fn)(void*, std::string_view, StreamHandle<char>)          -> VoidResult;
     auto (*stream_scan_fn)(void*, std::string_view)                             -> Result<StreamHandle<KVPair>>;
+    auto (*get_many_fn)(void*, std::span<const std::string_view>)               -> Result<std::vector<BatchGetItem>>;
+    bool  has_native_batch_get;     ///< true when backend implements get_many natively
     void (*destroy_fn)(void*);
 };
 
@@ -132,12 +149,46 @@ struct BackendHandle {
         if (!valid()) return std::unexpected(Error{"BackendHandle", "use-after-move or default-constructed"});
         return vtable->stream_scan_fn(ctx, prefix);
     }
+
+    /// Batch get — looks up many keys in one round trip.
+    /// Backends with native batch support (RocksDB MultiGet, SQLite IN-clause)
+    /// override has_native_batch_get; others fall through to a loop over get().
+    /// Result is in input-key order; missing keys carry std::nullopt.
+    [[nodiscard]] auto get_many(std::span<const std::string_view> keys) const
+        -> Result<std::vector<BatchGetItem>> {
+        if (!valid()) return std::unexpected(Error{"BackendHandle", "use-after-move or default-constructed"});
+        return vtable->get_many_fn(ctx, keys);
+    }
+
+    [[nodiscard]] auto has_native_batch_get() const noexcept -> bool {
+        return valid() && vtable->has_native_batch_get;
+    }
 };
 
 /// Build a vtable + handle for any type satisfying StorageBackend.
 /// The vtable is a static constexpr singleton per backend type.
+///
+/// get_many dispatch is concept-driven: backends satisfying HasNativeBatchGet
+/// route to their native implementation (RocksDB MultiGet, SQLite IN-clause,
+/// etc); others get a transparent loop over get().
 template <StorageBackend B>
 [[nodiscard]] auto make_backend_handle(B* backend) -> BackendHandle {
+    static constexpr auto get_many_native = [](void* c, std::span<const std::string_view> keys)
+        -> Result<std::vector<BatchGetItem>> {
+        if constexpr (HasNativeBatchGet<B>) {
+            return static_cast<B*>(c)->get_many(keys);
+        } else {
+            std::vector<BatchGetItem> out;
+            out.reserve(keys.size());
+            for (auto k : keys) {
+                auto r = static_cast<B*>(c)->get(k);
+                if (!r) return std::unexpected(r.error());
+                out.push_back(BatchGetItem{std::string(k), std::move(*r)});
+            }
+            return out;
+        }
+    };
+
     static constexpr BackendVTable vtable {
         .get_fn = [](void* c, std::string_view k) -> Result<std::optional<std::string>> {
             return static_cast<B*>(c)->get(k);
@@ -169,6 +220,8 @@ template <StorageBackend B>
         .stream_scan_fn = [](void* c, std::string_view p) -> Result<StreamHandle<KVPair>> {
             return static_cast<B*>(c)->stream_scan(p);
         },
+        .get_many_fn = get_many_native,
+        .has_native_batch_get = HasNativeBatchGet<B>,
         .destroy_fn = [](void* c) {
             delete static_cast<B*>(c);
         },
