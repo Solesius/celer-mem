@@ -240,22 +240,38 @@ TEST(ChaseLevDeque, StealConcurrentlyWithoutDataLoss) {
         dq.push(make_test_lease(i));
     }
 
+    // In Chase-Lev, steal() returns nullopt on BOTH empty and CAS-aborted.
+    // A stealer that exits on the first nullopt may bail during contention
+    // while items remain. Stealers must spin until the owner signals it has
+    // finished draining, at which point the deque is truly empty.
     std::atomic<int> steal_count{0};
+    std::atomic<bool> owner_done{false};
     auto stealer = [&]() {
         while (true) {
             auto r = dq.steal();
-            if (!r) break;
-            steal_count.fetch_add(1);
+            if (r) {
+                steal_count.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            // Nullopt — could be empty or CAS-aborted. Only exit once the
+            // owner has finished and a fresh steal still sees empty.
+            if (owner_done.load(std::memory_order_acquire)) {
+                if (!dq.steal()) break;   // confirmed empty
+                steal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+            // Back off briefly to avoid livelock with owner on CAS.
+            std::this_thread::yield();
         }
     };
 
-    int owner_count = 0;
     std::thread t1(stealer);
     std::thread t2(stealer);
 
+    int owner_count = 0;
     while (auto r = dq.pop()) {
         ++owner_count;
     }
+    owner_done.store(true, std::memory_order_release);
 
     t1.join();
     t2.join();

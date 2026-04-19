@@ -39,6 +39,16 @@
 #include "celer/api/table_ref.hpp"
 #include "celer/api/db_ref.hpp"
 #include "celer/api/store.hpp"
+
+// Necto (Actor + Swarm)
+#include "celer/necto/channel.hpp"
+#include "celer/necto/actor.hpp"
+#include "celer/necto/swarm/types.hpp"
+#include "celer/necto/swarm/field.hpp"
+#include "celer/necto/swarm/pheromone.hpp"
+#include "celer/necto/swarm/morph.hpp"
+#include "celer/necto/swarm/cluster.hpp"
+#include "celer/necto/swarm/swarm.hpp"
 #include "celer/api/global.hpp"
 
 // Materialization (RFC-005) — cross-store join + materialize

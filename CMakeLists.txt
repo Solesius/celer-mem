@@ -164,6 +164,7 @@ if(CELER_BUILD_TESTS)
     celer_add_gtest(celer_qpdf_tests tests/test_qpdf.cpp qpdf)
     celer_add_gtest(celer_materialization_tests tests/test_materialization.cpp materialization)
     celer_add_gtest(celer_core_coverage_tests tests/test_core_coverage.cpp unit)
+    celer_add_gtest(celer_necto_tests tests/test_necto.cpp necto)
 
     # option(LOCAL_DEV_INTEGRATION_SUITE "Build local-dev integration tests (S3 integ, requires AWS creds)" OFF)
     # if(LOCAL_DEV_INTEGRATION_SUITE)
@@ -211,6 +212,7 @@ if(CELER_BUILD_TESTS)
                 celer_qpdf_tests
                 celer_materialization_tests
                 celer_core_coverage_tests
+                celer_necto_tests
             USES_TERMINAL
         )
     endif()
