@@ -21,7 +21,7 @@
 /// Tour construction: P(next=j) ∝ τ(i,j)^α · η(i,j)^β
 /// where η(i,j) = 1/d(i,j) is the visibility heuristic.
 ///
-/// Usage:  ./example_12_route_solver [n_cities] [seed]
+/// Usage:  ./example_10_route_solver [n_cities] [seed]
 /// Default: 20 cities, time-based seed
 
 #include <algorithm>

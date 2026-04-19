@@ -5,7 +5,7 @@
 /// with real-time morph re-assignment (Bonabeau response-threshold),
 /// pheromone graph stats, and cluster order parameter φ.
 ///
-/// Usage:  ./example_06_swarm_demo
+/// Usage:  ./example_07_swarm_demo
 /// Press Ctrl+C to exit early.
 
 #include <chrono>

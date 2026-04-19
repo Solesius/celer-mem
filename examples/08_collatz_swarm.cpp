@@ -13,7 +13,7 @@
 /// Collatz rule: Even → N/2  |  Odd → 3N+1
 /// Example:  5 → 16 → 8 → 4 → 2 → 1
 ///
-/// Usage:  ./example_07_collatz_swarm [start_value]
+/// Usage:  ./example_08_collatz_swarm [start_value]
 /// Default: 5
 
 #include <algorithm>

@@ -286,7 +286,11 @@ All examples live in `examples/` and compile with `make examples`.
 | `03_batch_ops.cpp` | Batch writes, prefix grouping, foreach, compact |
 | `04_custom_backend.cpp` | Writing a custom `StorageBackend` (in-memory) |
 | `05_agent_memory.cpp` | llama.cpp chat agent with persistent memory |
-| `06_join_bench.cpp`   | 100k × 100k cross-store join benchmark |
+| `06_join_bench.cpp` | 100k × 100k cross-store join benchmark |
+| `07_swarm_demo.cpp` | Necto actor system + Vicsek swarm coordination |
+| `08_collatz_swarm.cpp` | Swarm exploration of the Collatz conjecture |
+| `09_fluid_ripple.cpp` | Grid-based fluid-field agents |
+| `10_route_solver.cpp` | ACO route solver (TSP-style) |
 
 Run an example after building:
 
@@ -437,6 +441,8 @@ Major design decisions live in `finalized/` as versioned documents:
 - [RFC-001 — celer-mem core](finalized/RFC-001-CELER-MEM.md)
 - [RFC-002 — streaming S3 backend](finalized/RFC-002-STREAMING-S3.md)
 - [RFC-003 — cross-store joins and materialization](finalized/RFC-003-cross-store-joins-and-materialization.md)
+- [RFC-004 — necto: brokerless actor IPC](finalized/RFC-004-necto-actor-ipc.md)
+- [RFC-005 — vicsek swarm intelligence](finalized/RFC-005-vicsek-swarm-agents.md)
 
 ## Roadmap
 

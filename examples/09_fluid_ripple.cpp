@@ -19,7 +19,7 @@
 ///     Evaluator   = pressure projection / divergence audit
 ///     Coordinator = settling / recirculation damping
 ///
-/// Usage:  ./example_10_fluid_ripple [grid_size] [jet_scale]
+/// Usage:  ./example_09_fluid_ripple [grid_size] [jet_scale]
 /// Default: 34×34 grid, jet_scale = 1.0
 
 #include <algorithm>
