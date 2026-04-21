@@ -1,5 +1,6 @@
 #include "celer/backend/rocksdb.hpp"
 
+#include <rocksdb/version.h>
 #include <filesystem>
 
 namespace celer {
@@ -174,14 +175,24 @@ auto open_single(const backends::rocksdb::Config& config, const std::string& res
     opts.max_open_files = config.max_open_files;
     opts.write_buffer_size = static_cast<std::size_t>(config.write_buffer_size_bytes);
 
+    // RocksDB 9+ changed DB::Open to accept std::unique_ptr<DB>* instead of DB**.
+#if ROCKSDB_MAJOR >= 9
+    std::unique_ptr<::rocksdb::DB> raw_db;
+    auto s = ::rocksdb::DB::Open(opts, resolved_path, &raw_db);
+    if (!s.ok()) {
+        return std::unexpected(Error{"RocksDBOpen",
+            "failed to open RocksDB at '" + resolved_path + "': " + s.ToString()});
+    }
+    auto* backend = new RocksDBBackend(raw_db.release());
+#else
     ::rocksdb::DB* raw_db{nullptr};
     auto s = ::rocksdb::DB::Open(opts, resolved_path, &raw_db);
     if (!s.ok()) {
         return std::unexpected(Error{"RocksDBOpen",
             "failed to open RocksDB at '" + resolved_path + "': " + s.ToString()});
     }
-
     auto* backend = new RocksDBBackend(raw_db);
+#endif
     return make_backend_handle<RocksDBBackend>(backend);
 }
 
